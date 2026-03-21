@@ -33,6 +33,16 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# ytdl-sub working directory and generated files
+.ytdl-sub-working-directory/
+ytdl-sub/subscriptions.yaml
+
+# local config
+.claude/settings.local.json
+.claude/launch.json
+.mcp.json
+.firecrawl/
+
 # vercel
 .vercel
 

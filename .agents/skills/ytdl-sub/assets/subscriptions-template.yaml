@@ -1,0 +1,25 @@
+# ytdl-sub Subscriptions Template
+# Copy this file and customize for your setup.
+# Reference: https://ytdl-sub.readthedocs.io/en/latest/guides/getting_started/subscriptions.html
+
+# File-level preset applied to all subscriptions in this file
+__preset__:
+  overrides:
+    tv_show_directory: "/path/to/tv_shows"
+
+# Full archive of channels (use Chunk Downloads for large channels)
+TV Show:
+  = Documentaries | Chunk Downloads:
+    "NOVA PBS": "https://www.youtube.com/@novapbs"
+    "National Geographic": "https://www.youtube.com/@NatGeo"
+
+  = Documentaries:
+    "Cosmos - What If": "https://www.youtube.com/playlist?list=PLZdXRHYAVxTJno6oFF9nLGuwXNGYHmE8U"
+
+  = Kids | = TV-Y:
+    "Jake Trains": "https://www.youtube.com/@JakeTrains"
+
+# Only keep recent videos (auto-deletes older ones)
+TV Show Only Recent:
+  = News:
+    "BBC News": "https://www.youtube.com/@BBCNews"
