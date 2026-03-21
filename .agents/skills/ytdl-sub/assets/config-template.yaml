@@ -1,0 +1,36 @@
+# ytdl-sub Configuration Template
+# Copy this file and customize for your setup.
+# Reference: https://ytdl-sub.readthedocs.io/en/latest/config_reference/config_yaml.html
+
+configuration:
+  working_directory: ".ytdl-sub-working-directory"
+
+presets:
+  # Custom TV Show preset inheriting from a prebuilt preset.
+  # Change "Jellyfin" to your media player: Plex, Emby, Kodi
+  TV Show:
+    preset:
+      - "Jellyfin TV Show by Date"
+      - "Max 1080p"
+
+    embed_thumbnail: True
+
+    throttle_protection:
+      sleep_per_download_s:
+        min: 2.2
+        max: 10.8
+      sleep_per_subscription_s:
+        min: 9.0
+        max: 14.1
+      max_downloads_per_subscription:
+        min: 10
+        max: 36
+
+    overrides:
+      tv_show_directory: "/path/to/tv_shows"
+
+  # Variant that only keeps recent videos
+  TV Show Only Recent:
+    preset:
+      - "TV Show"
+      - "Only Recent"

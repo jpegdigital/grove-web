@@ -1,0 +1,22 @@
+[project]
+name = "pradotube-scripts"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "supabase",
+    "pyyaml",
+]
+
+[tool.uv]
+dev-dependencies = []
+
+[project.scripts]
+sync-subscriptions = "scripts.sync_subscriptions:main"
+sync-downloads = "scripts.sync_downloads:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["scripts"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
