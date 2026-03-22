@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback } from "react";
+import { useMountEffect } from "@/hooks/use-mount-effect";
 import { Play, Pause } from "lucide-react";
 
 // YouTube IFrame API player state constants
@@ -74,18 +75,12 @@ export function YouTubePlayer({ videoId, title }: YouTubePlayerProps) {
   const playerRef = useRef<YTPlayer | null>(null);
   const [showOverlay, setShowOverlay] = useState(false);
 
-  // Build/rebuild player when videoId changes
-  useEffect(() => {
+  // Build player on mount; parent uses key={videoId} to remount on change
+  useMountEffect(() => {
     let destroyed = false;
 
     function createPlayer() {
       if (destroyed || !containerRef.current) return;
-
-      // Clear any previous player
-      if (playerRef.current) {
-        playerRef.current.destroy();
-        playerRef.current = null;
-      }
 
       // The API replaces this div with an iframe
       const el = document.createElement("div");
@@ -124,7 +119,7 @@ export function YouTubePlayer({ videoId, title }: YouTubePlayerProps) {
         playerRef.current = null;
       }
     };
-  }, [videoId]);
+  });
 
   const handleOverlayClick = useCallback(() => {
     if (playerRef.current) {
