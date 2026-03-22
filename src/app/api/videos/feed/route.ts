@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import {
+  scoreFeed,
+  diversify,
+  DEFAULT_PRIORITY,
+  MAX_CONSECUTIVE_SAME_CREATOR,
+  type VideoInput,
+  type ScoringContext,
+} from "@/lib/feed-scoring";
 
 interface FeedVideo {
   id: string;
@@ -50,8 +58,8 @@ export async function GET(request: NextRequest) {
     const { data: curatedRows, error: curatedErr } = await supabase
       .from("curated_channels")
       .select(
-        `channel_id, creator_id,
-         creators(id, name, slug, display_order, avatar_channel_id),
+        `channel_id, creator_id, priority,
+         creators(id, name, slug, display_order, avatar_channel_id, priority),
          channels(youtube_id, title, thumbnail_url)`
       )
       .order("display_order", { ascending: true });
@@ -86,6 +94,8 @@ export async function GET(request: NextRequest) {
       thumbnailUrl: string;
       creatorId: string | null;
       creator: CreatorInfo | null;
+      channelPriority: number;
+      creatorPriority: number;
     };
 
     const channelMap = new Map<string, ChannelInfo>();
@@ -102,6 +112,7 @@ export async function GET(request: NextRequest) {
         slug: string;
         display_order: number;
         avatar_channel_id: string | null;
+        priority: number;
       } | null;
 
       if (!ch) continue;
@@ -119,6 +130,8 @@ export async function GET(request: NextRequest) {
               avatarChannelId: cr.avatar_channel_id,
             }
           : null,
+        channelPriority: (cc as unknown as { priority: number }).priority ?? DEFAULT_PRIORITY,
+        creatorPriority: cr?.priority ?? DEFAULT_PRIORITY,
       });
     }
 
@@ -188,10 +201,49 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    // Step 4: Interleave by creator
-    const interleaved = interleaveByCreator(feedVideos, channelMap);
-    const total = interleaved.length;
-    const page = interleaved.slice(offset, offset + limit);
+    // Step 4: Score and sort feed
+    const channelPriorities = new Map<string, number>();
+    const creatorPriorities = new Map<string, number>();
+    const creatorChannelCounts = new Map<string, number>();
+
+    for (const [chId, info] of channelMap) {
+      channelPriorities.set(chId, info.channelPriority);
+      if (info.creatorId) {
+        creatorPriorities.set(info.creatorId, info.creatorPriority);
+        creatorChannelCounts.set(
+          info.creatorId,
+          (creatorChannelCounts.get(info.creatorId) ?? 0) + 1
+        );
+      }
+    }
+
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+
+    const scoringCtx: ScoringContext = {
+      date: today,
+      creatorChannelCounts: creatorFilter
+        ? new Map() // skip fairness for single-creator view
+        : creatorChannelCounts,
+    };
+
+    const videoInputs: VideoInput[] = feedVideos.map((v) => ({
+      id: v.id,
+      publishedAt: v.publishedAt,
+      channelId: v.channelId,
+      creatorId: v.creatorId ?? v.channelId, // ungrouped → use channelId as pseudo-creator
+    }));
+
+    const scored = scoreFeed(videoInputs, channelPriorities, creatorPriorities, scoringCtx);
+    const diversified = creatorFilter
+      ? scored // skip diversity for single-creator view
+      : diversify(scored, MAX_CONSECUTIVE_SAME_CREATOR);
+
+    // Map scored results back to FeedVideo order
+    const videoById = new Map(feedVideos.map((v) => [v.id, v]));
+    const sortedFeed = diversified.map((s) => videoById.get(s.video.id)!);
+
+    const total = sortedFeed.length;
+    const page = sortedFeed.slice(offset, offset + limit);
 
     // Step 5: Build creators list for chips (only those with downloaded videos)
     const creatorsWithVideos = buildCreatorList(feedVideos, channelMap);
@@ -209,86 +261,6 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-/**
- * Round-robin interleave videos by creator.
- * Creators ordered by display_order, ungrouped channels last.
- * Within each creator, videos sorted by published_at DESC.
- */
-function interleaveByCreator(
-  videos: FeedVideo[],
-  channelMap: Map<
-    string,
-    {
-      title: string;
-      thumbnailUrl: string;
-      creatorId: string | null;
-      creator: {
-        id: string;
-        name: string;
-        slug: string;
-        displayOrder: number;
-        avatarChannelId: string | null;
-      } | null;
-    }
-  >
-): FeedVideo[] {
-  // Group by channel — each channel gets its own round-robin slot
-  const groups = new Map<
-    string,
-    { displayOrder: number; videos: FeedVideo[] }
-  >();
-
-  for (const v of videos) {
-    if (!groups.has(v.channelId)) {
-      const ch = channelMap.get(v.channelId);
-      const order = ch?.creator?.displayOrder ?? 9999;
-      groups.set(v.channelId, { displayOrder: order, videos: [] });
-    }
-    groups.get(v.channelId)!.videos.push(v);
-  }
-
-  // Sort groups by creator display_order, then alphabetically by channel
-  const sorted = [...groups.entries()].sort((a, b) => {
-    const orderDiff = a[1].displayOrder - b[1].displayOrder;
-    if (orderDiff !== 0) return orderDiff;
-    return a[0].localeCompare(b[0]);
-  });
-
-  // Each group already has videos sorted by published_at DESC (from the query)
-  // but let's ensure it
-  for (const [, group] of sorted) {
-    group.videos.sort(
-      (a, b) =>
-        new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
-    );
-  }
-
-  // Round-robin deal
-  const result: FeedVideo[] = [];
-  const iterators = sorted.map(([, g]) => ({
-    videos: g.videos,
-    index: 0,
-  }));
-
-  let hasMore = true;
-  while (hasMore) {
-    hasMore = false;
-    for (const it of iterators) {
-      if (it.index < it.videos.length) {
-        result.push(it.videos[it.index]);
-        it.index++;
-        if (it.index < it.videos.length) hasMore = true;
-      }
-    }
-    // Check if any iterator still has videos
-    if (!hasMore) {
-      hasMore = iterators.some((it) => it.index < it.videos.length);
-    }
-  }
-
-  return result;
 }
 
 /**

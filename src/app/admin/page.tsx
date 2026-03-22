@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, type ReactNode } from "react";
+import { useState, useCallback, useRef, type ReactNode } from "react";
+import { useMountEffect } from "@/hooks/use-mount-effect";
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import { useTheme } from "next-themes";
@@ -11,6 +12,7 @@ import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Toaster, toast } from "sonner";
 import { supabase } from "@/lib/supabase";
+import { StarRating } from "@/components/ui/star-rating";
 import {
   Search,
   Plus,
@@ -50,12 +52,14 @@ interface Channel {
   videoCount: string;
   viewCount: string;
   publishedAt: string;
+  priority: number;
 }
 
 interface CuratedChannelRow {
   id: string;
   channel_id: string;
   display_order: number;
+  priority: number;
   creator_id: string | null;
   channels: {
     youtube_id: string;
@@ -77,6 +81,7 @@ interface Creator {
   avatar_channel_id: string | null;
   cover_channel_id: string | null;
   display_order: number;
+  priority: number;
   curated_channels: CuratedChannelRow[];
 }
 
@@ -112,6 +117,7 @@ function rowToChannel(
   return {
     curatedId: row.id,
     creatorId: row.creator_id,
+    priority: row.priority ?? 50,
     id: ch.youtube_id,
     title: ch.title,
     description: ch.description || "",
@@ -170,6 +176,7 @@ function dbRowToChannel(row: {
     videoCount: String(row.video_count),
     viewCount: String(row.view_count),
     publishedAt: row.published_at || "",
+    priority: 50,
   };
 }
 
@@ -202,7 +209,7 @@ export default function AdminPage() {
   const { theme, setTheme } = useTheme();
   const queryClient = useQueryClient();
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  useMountEffect(() => setMounted(true));
   const [searchInput, setSearchInput] = useState("");
   const [lookupResult, setLookupResult] = useState<Channel | null>(null);
   const [searchResults, setSearchResults] = useState<Channel[]>([]);
@@ -234,12 +241,14 @@ export default function AdminPage() {
   const creators = [...(creatorsData?.creators || [])].sort((a, b) => a.name.localeCompare(b.name));
   const ungroupedChannels = creatorsData?.ungrouped || [];
 
-  // Auto-focus create input
-  useEffect(() => {
-    if (showCreateForm && createInputRef.current) {
-      createInputRef.current.focus();
-    }
-  }, [showCreateForm]);
+  const toggleCreateForm = useCallback(() => {
+    setShowCreateForm((prev) => {
+      if (!prev) {
+        requestAnimationFrame(() => createInputRef.current?.focus());
+      }
+      return !prev;
+    });
+  }, []);
 
   // ─── Search handlers ─────────────────────────────────────────────────────
 
@@ -346,7 +355,6 @@ export default function AdminPage() {
 
       queryClient.invalidateQueries({ queryKey: ["curated-channels"] });
       queryClient.invalidateQueries({ queryKey: ["creators"] });
-      setExpandedChannel((prev) => (prev === channelId ? null : prev));
       toast("Channel removed");
     },
     [queryClient]
@@ -409,7 +417,6 @@ export default function AdminPage() {
       queryClient.invalidateQueries({ queryKey: ["creators"] });
       setNewCreatorName("");
       setShowCreateForm(false);
-      setExpandedCreators((prev) => new Set([...prev, creator.id]));
       toast.success(`Created "${creator.name}"`);
     } catch {
       toast.error("Failed to create group");
@@ -490,6 +497,46 @@ export default function AdminPage() {
       }
     },
     [creators, ungroupedChannels, queryClient]
+  );
+
+  const updateChannelPriority = useCallback(
+    async (curatedId: string, priority: number) => {
+      try {
+        const res = await fetch(`/api/curated-channels/${curatedId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ priority }),
+        });
+        if (!res.ok) {
+          toast.error("Failed to update priority");
+          return;
+        }
+        queryClient.invalidateQueries({ queryKey: ["creators"] });
+      } catch {
+        toast.error("Failed to update priority");
+      }
+    },
+    [queryClient]
+  );
+
+  const updateCreatorPriority = useCallback(
+    async (creatorId: string, priority: number) => {
+      try {
+        const res = await fetch(`/api/creators/${creatorId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ priority }),
+        });
+        if (!res.ok) {
+          toast.error("Failed to update priority");
+          return;
+        }
+        queryClient.invalidateQueries({ queryKey: ["creators"] });
+      } catch {
+        toast.error("Failed to update priority");
+      }
+    },
+    [queryClient]
   );
 
   const updateCreatorAvatar = useCallback(
@@ -680,7 +727,7 @@ export default function AdminPage() {
                   </button>
                 </div>
                 <button
-                  onClick={() => setShowCreateForm(!showCreateForm)}
+                  onClick={toggleCreateForm}
                   className="admin-button font-body flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold transition-all"
                 >
                   <Plus className="h-4 w-4" />
@@ -829,9 +876,14 @@ export default function AdminPage() {
                             <h3 className={`font-body truncate font-semibold text-foreground ${viewMode === "grid" ? "text-base" : "text-[15px]"}`}>
                               {creator.name}
                             </h3>
-                            <p className="font-body text-xs text-muted-foreground">
-                              {channelCount} channel{channelCount !== 1 ? "s" : ""}
-                            </p>
+                            <div className="font-body flex items-center gap-2 text-xs text-muted-foreground">
+                              <StarRating
+                                value={creator.priority}
+                                onChange={(v) => updateCreatorPriority(creator.id, v)}
+                                size={12}
+                              />
+                              <span>{channelCount} ch</span>
+                            </div>
                           </div>
 
                           {/* Group-level actions */}
@@ -928,6 +980,7 @@ export default function AdminPage() {
                                     creators={creators}
                                     onAssign={assignChannelToCreator}
                                     showUngroup
+                                    onPriorityChange={updateChannelPriority}
                                   />
                                 );
                               })}
@@ -970,13 +1023,10 @@ export default function AdminPage() {
                             channel={ch}
                             curatedId={cc.id}
                             onRemove={removeChannel}
-                            onToggleVideos={toggleVideos}
-                            expandedChannel={expandedChannel}
-                            loadingVideos={loadingVideos}
-                            channelVideos={channelVideos}
                             creators={creators}
                             onAssign={assignChannelToCreator}
                             showUngroup={false}
+                            onPriorityChange={updateChannelPriority}
                           />
                         );
                       })}
@@ -1125,6 +1175,46 @@ export default function AdminPage() {
 
 // ─── Sub-Components ──────────────────────────────────────────────────────────
 
+/** Dismiss listeners — mounted only when dropdown is open (Rule 4: useMountEffect) */
+function DropdownDismissListeners({
+  dropdownRef,
+  buttonRef,
+  onClose,
+}: {
+  dropdownRef: React.RefObject<HTMLDivElement | null>;
+  buttonRef: React.RefObject<HTMLButtonElement | null>;
+  onClose: () => void;
+}) {
+  useMountEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node) &&
+        buttonRef.current &&
+        !buttonRef.current.contains(e.target as Node)
+      ) {
+        onClose();
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    const handleScroll = () => onClose();
+
+    document.addEventListener("mousedown", handleOutsideClick);
+    document.addEventListener("keydown", handleKey);
+    const scrollParent = buttonRef.current?.closest(".admin-main-v2");
+    scrollParent?.addEventListener("scroll", handleScroll);
+
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+      document.removeEventListener("keydown", handleKey);
+      scrollParent?.removeEventListener("scroll", handleScroll);
+    };
+  });
+  return null;
+}
+
 /** Inline move-to-group dropdown — replaces the broken native select */
 function MoveToGroupDropdown({
   curatedId,
@@ -1150,38 +1240,7 @@ function MoveToGroupDropdown({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
-  // Close on outside click
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(e.target as Node) &&
-        buttonRef.current &&
-        !buttonRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  // Close on Escape or scroll
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    const onScroll = () => setOpen(false);
-    document.addEventListener("keydown", onKey);
-    const scrollParent = buttonRef.current?.closest('.admin-main-v2');
-    scrollParent?.addEventListener("scroll", onScroll);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      scrollParent?.removeEventListener("scroll", onScroll);
-    };
-  }, [open]);
+  // Listeners are mounted via DropdownDismissListeners below (only when open)
 
   // Calculate position and open
   const handleOpen = () => {
@@ -1209,6 +1268,7 @@ function MoveToGroupDropdown({
         <FolderInput className="h-3.5 w-3.5" />
       </button>
 
+      {open && <DropdownDismissListeners dropdownRef={dropdownRef} buttonRef={buttonRef} onClose={() => setOpen(false)} />}
       {open && createPortal(
         <div
           ref={dropdownRef}
@@ -1284,8 +1344,9 @@ function ChannelRow({
   creators,
   onAssign,
   showUngroup,
+  onPriorityChange,
 }: {
-  channel: Channel & { curatedId: string; creatorId: string | null };
+  channel: Channel & { curatedId: string; creatorId: string | null; priority: number };
   curatedId: string;
   onRemove: (channelId: string) => void;
   creators: Creator[];
@@ -1295,6 +1356,7 @@ function ChannelRow({
     title: string
   ) => void;
   showUngroup: boolean;
+  onPriorityChange: (curatedId: string, priority: number) => void;
 }) {
   return (
     <div className="channel-row group/ch">
@@ -1317,6 +1379,11 @@ function ChannelRow({
           </p>
           <div className="mt-0.5 flex items-center gap-2 leading-none">
           <div className="font-body flex items-center gap-2 text-xs text-muted-foreground">
+            <StarRating
+              value={channel.priority}
+              onChange={(v) => onPriorityChange(curatedId, v)}
+              size={12}
+            />
             <span>{formatCount(channel.subscriberCount)} subs</span>
             <span>·</span>
             <span>{formatCount(channel.videoCount)} vids</span>

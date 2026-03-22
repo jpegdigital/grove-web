@@ -13,6 +13,16 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if ("creator_id" in body) updates.creator_id = body.creator_id;
     if (body.display_order !== undefined)
       updates.display_order = body.display_order;
+    if (body.priority !== undefined) {
+      const p = Number(body.priority);
+      if (!Number.isInteger(p) || p < 0 || p > 100) {
+        return NextResponse.json(
+          { error: "priority must be an integer between 0 and 100" },
+          { status: 400 }
+        );
+      }
+      updates.priority = p;
+    }
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json(
