@@ -127,12 +127,14 @@ export function computeChannelRanks(
  *
  * Formula:
  *   score = (relativeRecency * W_RECENCY)
- *         + (channelPri * creatorPri * fairness * W_PRIORITY)
+ *         + (channelPri * creatorPri * W_PRIORITY)
  *         + (jitter * W_JITTER)
  *         + (freshness * W_FRESHNESS)
  *
  * relativeRecency: 0–1 rank within the video's own channel (newest=1)
  * freshness: 1.0 if published within 7 days, 0.0 otherwise
+ * Note: fairness (multi-channel balancing) is handled by the diversity
+ * post-pass, not in the score formula.
  */
 export function scoreVideo(
   video: VideoInput,
@@ -143,11 +145,10 @@ export function scoreVideo(
   relativeRecency: number = 1.0,
   weights: ScoringWeights = SCORING_WEIGHTS
 ): number {
-  // Priority: channel * creator normalized to [0, 1], with fairness
+  // Priority: channel * creator normalized to [0, 1]
   const chPri = channelPriority / 100;
   const crPri = creatorPriority / 100;
-  const fairness = 1 / Math.sqrt(Math.max(1, channelCount));
-  const priority = chPri * crPri * fairness;
+  const priority = chPri * crPri;
 
   // Jitter: deterministic daily hash
   const jitter = hashToFloat(`${date}:${video.id}`);

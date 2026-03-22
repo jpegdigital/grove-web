@@ -314,6 +314,9 @@ function buildCreatorList(
   }
 
   return [...seen.entries()]
-    .sort((a, b) => a[1].order - b[1].order)
+    .sort((a, b) => {
+      const stripThe = (s: string) => s.replace(/^The\s+/i, "");
+      return stripThe(a[1].name).localeCompare(stripThe(b[1].name));
+    })
     .map(([id, info]) => ({ id, slug: info.slug, name: info.name, avatar: info.avatar }));
 }
