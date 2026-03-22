@@ -3,7 +3,8 @@
 import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback } from "react";
+import { useMountEffect } from "@/hooks/use-mount-effect";
 import Link from "next/link";
 import Image from "next/image";
 import {
@@ -13,7 +14,6 @@ import {
   Eye,
   ThumbsUp,
   MessageSquare,
-  ExternalLink,
   Sun,
   Moon,
   Tv,
@@ -26,7 +26,6 @@ import {
   Monitor,
   ChevronDown,
   ChevronUp,
-  Users,
   Loader2,
 } from "lucide-react";
 
@@ -149,6 +148,10 @@ function LocalPlayer({
   const [showControls, setShowControls] = useState(true);
   const [activeChapter, setActiveChapter] = useState<Chapter | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout>>(null);
+  const chaptersRef = useRef(chapters);
+  chaptersRef.current = chapters;
+  const onEndedRef = useRef(onEnded);
+  onEndedRef.current = onEnded;
 
   const src = `/api/media/${mediaPath}`;
 
@@ -204,15 +207,16 @@ function LocalPlayer({
     }, 3000);
   }, []);
 
-  // Update current time + active chapter
-  useEffect(() => {
+  // Subscribe to video element events on mount
+  useMountEffect(() => {
     const v = videoRef.current;
     if (!v) return;
 
     const onTimeUpdate = () => {
       setCurrentTime(v.currentTime);
-      if (chapters) {
-        const ch = chapters.find(
+      const chs = chaptersRef.current;
+      if (chs) {
+        const ch = chs.find(
           (c) => v.currentTime >= c.startTime && v.currentTime < c.endTime
         );
         setActiveChapter(ch ?? null);
@@ -229,7 +233,7 @@ function LocalPlayer({
     };
 
     const onEndedHandler = () => {
-      onEnded?.();
+      onEndedRef.current?.();
     };
 
     v.addEventListener("timeupdate", onTimeUpdate);
@@ -245,7 +249,7 @@ function LocalPlayer({
       v.removeEventListener("pause", onPause);
       v.removeEventListener("ended", onEndedHandler);
     };
-  }, [chapters, scheduleHide, onEnded]);
+  });
 
   const progressPct = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -422,6 +426,17 @@ export default function VideoPage() {
     enabled: !!creatorSlug && videoEnded,
   });
 
+  // Sidebar feed videos
+  const { data: feedVideos } = useQuery<SuggestionVideo[]>({
+    queryKey: ["sidebar-feed"],
+    queryFn: async () => {
+      const res = await fetch("/api/videos/feed?limit=20");
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.videos ?? [];
+    },
+  });
+
   // Loading
   if (isLoading) {
     return (
@@ -517,7 +532,10 @@ export default function VideoPage() {
       </header>
 
       {/* Main content */}
-      <main className="relative z-10 mx-auto max-w-5xl px-4 pb-16 sm:px-6 lg:px-8">
+      <main className="relative z-10 mx-auto max-w-7xl px-4 pb-16 sm:px-6 lg:px-8">
+        <div className="lg:grid lg:grid-cols-[1fr_340px] lg:gap-6">
+        {/* Left column: player + metadata */}
+        <div className="min-w-0">
         {/* Player */}
         <div className="relative mt-4 overflow-hidden rounded-2xl shadow-xl ring-1 ring-border/30">
           <LocalPlayer
@@ -612,18 +630,6 @@ export default function VideoPage() {
               </div>
             </div>
 
-            {/* Source link */}
-            {video.webpageUrl && (
-              <a
-                href={video.webpageUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-body inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-muted-foreground ring-1 ring-border hover:bg-secondary hover:text-foreground transition-all"
-              >
-                <ExternalLink className="h-3 w-3" />
-                Watch on YouTube
-              </a>
-            )}
           </div>
         </div>
 
@@ -768,6 +774,86 @@ export default function VideoPage() {
               <span>Category: {video.categories.join(", ")}</span>
             )}
           </div>
+        </div>
+        </div>
+
+        {/* Right sidebar: feed videos */}
+        <aside className="hidden lg:block mt-4">
+          <div className="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto pr-1 scrollbar-thin">
+            <div className="flex flex-col gap-2">
+              {feedVideos?.map((v) => {
+                const thumb = v.thumbnailPath
+                  ? `/api/media/${v.thumbnailPath}`
+                  : v.thumbnailUrl;
+                const isActive = v.id === id;
+                return (
+                  <Link
+                    key={v.id}
+                    href={`/v/${v.id}`}
+                    className={`group flex gap-2 rounded-lg p-1.5 transition-colors ${
+                      isActive
+                        ? "bg-primary/8 ring-1 ring-primary/25"
+                        : "hover:bg-secondary"
+                    }`}
+                  >
+                    {/* Thumbnail */}
+                    <div className="relative w-40 shrink-0 aspect-video overflow-hidden rounded-lg bg-secondary">
+                      {thumb ? (
+                        <Image
+                          src={thumb}
+                          alt={v.title}
+                          fill
+                          className="object-cover"
+                          sizes="160px"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-secondary to-muted">
+                          <span className="font-heading text-lg text-muted-foreground/40">
+                            {v.title.charAt(0)}
+                          </span>
+                        </div>
+                      )}
+                      {v.durationSeconds > 0 && (
+                        <div className="absolute bottom-1 right-1 rounded bg-black/75 px-1 py-0.5 font-body text-[10px] font-bold text-white tabular-nums">
+                          {formatTimestamp(v.durationSeconds)}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Details */}
+                    <div className="min-w-0 flex-1 py-0.5">
+                      <p className="font-body text-sm font-medium text-foreground leading-snug line-clamp-2 group-hover:text-primary transition-colors">
+                        {v.title}
+                      </p>
+                      <div className="mt-1.5 flex items-center gap-1.5">
+                        <div className="relative h-5 w-5 shrink-0 overflow-hidden rounded-full bg-secondary ring-1 ring-border/30">
+                          {v.creatorAvatar ? (
+                            <Image
+                              src={v.creatorAvatar}
+                              alt={v.creatorName}
+                              fill
+                              className="object-cover"
+                              sizes="20px"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary/20 to-primary/5">
+                              <span className="font-heading text-[8px] text-primary">
+                                {v.creatorName.charAt(0)}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <span className="font-body text-xs text-muted-foreground truncate">
+                          {v.creatorName}
+                        </span>
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        </aside>
         </div>
       </main>
     </div>
