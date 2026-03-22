@@ -1,14 +1,13 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import { useTheme } from "next-themes";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Toaster, toast } from "sonner";
 import { supabase } from "@/lib/supabase";
@@ -19,12 +18,8 @@ import {
   ExternalLink,
   Tv,
   Users,
-  Eye,
   Film,
   Loader2,
-  Sparkles,
-  ChevronDown,
-  ChevronUp,
   Sun,
   Moon,
   ArrowUp,
@@ -33,6 +28,13 @@ import {
   X,
   ImageIcon,
   Ungroup,
+  Hash,
+  FolderInput,
+  Check,
+  PanelRightClose,
+  PanelRightOpen,
+  LayoutGrid,
+  LayoutList,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -48,16 +50,6 @@ interface Channel {
   videoCount: string;
   viewCount: string;
   publishedAt: string;
-}
-
-interface Video {
-  id: string;
-  title: string;
-  description: string;
-  thumbnailUrl: string;
-  publishedAt: string;
-  channelId: string;
-  channelTitle: string;
 }
 
 interface CuratedChannelRow {
@@ -113,7 +105,9 @@ function formatCount(count: string): string {
   return String(num);
 }
 
-function rowToChannel(row: CuratedChannelRow): Channel & { curatedId: string; creatorId: string | null } {
+function rowToChannel(
+  row: CuratedChannelRow
+): Channel & { curatedId: string; creatorId: string | null } {
   const ch = row.channels;
   return {
     curatedId: row.id,
@@ -207,25 +201,21 @@ async function fetchCreatorsData(): Promise<CreatorsResponse> {
 export default function AdminPage() {
   const { theme, setTheme } = useTheme();
   const queryClient = useQueryClient();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const [searchInput, setSearchInput] = useState("");
   const [lookupResult, setLookupResult] = useState<Channel | null>(null);
   const [searchResults, setSearchResults] = useState<Channel[]>([]);
-  const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
-  const [channelVideos, setChannelVideos] = useState<Record<string, Video[]>>(
-    {}
-  );
   const [isLoading, setIsLoading] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
-  const [loadingVideos, setLoadingVideos] = useState<string | null>(null);
   const [mode, setMode] = useState<"lookup" | "search">("lookup");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [viewMode, setViewMode] = useState<"list" | "grid">("grid");
 
   // Creator state
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newCreatorName, setNewCreatorName] = useState("");
   const [isCreatingCreator, setIsCreatingCreator] = useState(false);
-  const [expandedCreators, setExpandedCreators] = useState<Set<string>>(
-    new Set()
-  );
   const [editingAvatar, setEditingAvatar] = useState<string | null>(null);
   const createInputRef = useRef<HTMLInputElement>(null);
 
@@ -241,7 +231,7 @@ export default function AdminPage() {
 
   const isHydrated = !isHydrating && !isCreatorsLoading;
 
-  const creators = creatorsData?.creators || [];
+  const creators = [...(creatorsData?.creators || [])].sort((a, b) => a.name.localeCompare(b.name));
   const ungroupedChannels = creatorsData?.ungrouped || [];
 
   // Auto-focus create input
@@ -471,7 +461,6 @@ export default function AdminPage() {
         if (creatorId) {
           const creator = creators.find((c) => c.id === creatorId);
           if (creator && !creator.avatar_channel_id) {
-            // Find the channel_id from the curated channel row
             const allChannels = [
               ...creators.flatMap((c) => c.curated_channels),
               ...ungroupedChannels,
@@ -559,49 +548,9 @@ export default function AdminPage() {
     [creators, queryClient]
   );
 
-  // ─── Video toggle ─────────────────────────────────────────────────────────
-
-  const toggleVideos = useCallback(
-    async (channelId: string) => {
-      if (expandedChannel === channelId) {
-        setExpandedChannel(null);
-        return;
-      }
-
-      setExpandedChannel(channelId);
-
-      if (!channelVideos[channelId]) {
-        setLoadingVideos(channelId);
-        try {
-          const res = await fetch(
-            `/api/youtube/videos?channelId=${encodeURIComponent(channelId)}`
-          );
-          const data = await res.json();
-          if (res.ok) {
-            setChannelVideos((prev) => ({ ...prev, [channelId]: data }));
-          }
-        } catch {
-          toast.error("Failed to load videos");
-        } finally {
-          setLoadingVideos(null);
-        }
-      }
-    },
-    [expandedChannel, channelVideos]
-  );
-
-  const toggleCreator = (creatorId: string) => {
-    setExpandedCreators((prev) => {
-      const next = new Set(prev);
-      if (next.has(creatorId)) next.delete(creatorId);
-      else next.add(creatorId);
-      return next;
-    });
-  };
-
   const isCurated = (id: string) => curatedChannels.some((c) => c.id === id);
 
-  // ─── Get avatar thumbnail for a creator ───────────────────────────────────
+  // ─── Get avatar/cover for a creator ──────────────────────────────────────
 
   function getCreatorAvatar(creator: Creator): string | null {
     if (creator.avatar_channel_id) {
@@ -610,7 +559,6 @@ export default function AdminPage() {
       );
       if (ch?.channels?.thumbnail_url) return ch.channels.thumbnail_url;
     }
-    // Fallback: first channel's thumbnail
     if (creator.curated_channels.length > 0) {
       return creator.curated_channels[0].channels?.thumbnail_url || null;
     }
@@ -630,6 +578,7 @@ export default function AdminPage() {
     return null;
   }
 
+
   // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
@@ -639,63 +588,111 @@ export default function AdminPage() {
 
       {/* Full-width header bar */}
       <header className="admin-header relative z-10">
-        <div className="flex items-center justify-between px-6 py-4">
+        <div className="flex items-center justify-between px-6 py-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/12 ring-1 ring-primary/25">
-              <Tv className="h-[18px] w-[18px] text-primary" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
+              <Tv className="h-4 w-4 text-primary" />
             </div>
             <div>
-              <h1 className="font-heading text-lg leading-none tracking-tight text-foreground">
+              <h1 className="font-heading text-base leading-none tracking-tight text-foreground">
                 PradoTube
               </h1>
-              <p className="font-body mt-0.5 text-[10px] font-semibold tracking-[0.15em] text-primary/60 uppercase">
-                Admin
+              <p className="font-body mt-1 text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase">
+                Channel Manager
               </p>
             </div>
           </div>
-          <button
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-          >
-            {theme === "dark" ? (
-              <Sun className="h-4 w-4" />
-            ) : (
-              <Moon className="h-4 w-4" />
-            )}
-          </button>
+
+          <div className="flex items-center gap-2">
+            <div className="font-body mr-2 hidden items-center gap-4 text-sm text-foreground/60 sm:flex">
+              <span className="flex items-center gap-1.5">
+                <Hash className="h-3.5 w-3.5" />
+                {curatedChannels.length} channels
+              </span>
+              <span className="flex items-center gap-1.5">
+                <FolderPlus className="h-3.5 w-3.5" />
+                {creators.length} groups
+              </span>
+            </div>
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              title={sidebarOpen ? "Hide search" : "Show search"}
+            >
+              {sidebarOpen ? (
+                <PanelRightClose className="h-4 w-4" />
+              ) : (
+                <PanelRightOpen className="h-4 w-4" />
+              )}
+            </button>
+            <button
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              {mounted ? (
+                theme === "dark" ? (
+                  <Sun className="h-4 w-4" />
+                ) : (
+                  <Moon className="h-4 w-4" />
+                )
+              ) : (
+                <Moon className="h-4 w-4" />
+              )}
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* Two-panel layout */}
-      <div className="admin-layout relative z-10">
-        {/* Left panel — Curated sidebar */}
-        <aside className="admin-sidebar">
-          <div className="sticky top-0">
-            {/* Sidebar header */}
-            <div className="flex items-center justify-between px-5 pt-6 pb-4">
-              <div>
-                <h2 className="font-heading text-lg text-foreground">
-                  Curated
-                </h2>
-                <p className="font-body mt-0.5 text-xs text-muted-foreground">
-                  {curatedChannels.length} channel{curatedChannels.length !== 1 ? "s" : ""}
-                  {creators.length > 0 &&
-                    ` · ${creators.length} group${creators.length !== 1 ? "s" : ""}`}
-                </p>
+      {/* Two-panel layout: Main (groups) | Sidebar (search) */}
+      <div className="admin-layout-v2 relative z-10">
+        {/* ── LEFT: Main content — Groups & Channels ── */}
+        <main className="admin-main-v2">
+          <div className="px-6 pt-5 pb-8 lg:px-10">
+            {/* Main header with actions */}
+            <div className="mb-5 flex items-center justify-between">
+              <h2 className="font-body text-xl font-bold tracking-tight text-foreground">
+                Groups
+              </h2>
+              <div className="flex items-center gap-2.5">
+                {/* View toggle */}
+                <div className="admin-segmented-toggle inline-flex rounded-lg p-0.5">
+                  <button
+                    onClick={() => setViewMode("grid")}
+                    className={`admin-segment rounded-md p-2 transition-all ${
+                      viewMode === "grid"
+                        ? "active"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                    title="Grid view"
+                  >
+                    <LayoutGrid className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => setViewMode("list")}
+                    className={`admin-segment rounded-md p-2 transition-all ${
+                      viewMode === "list"
+                        ? "active"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                    title="List view"
+                  >
+                    <LayoutList className="h-4 w-4" />
+                  </button>
+                </div>
+                <button
+                  onClick={() => setShowCreateForm(!showCreateForm)}
+                  className="admin-button font-body flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold transition-all"
+                >
+                  <Plus className="h-4 w-4" />
+                  New group
+                </button>
               </div>
-              <button
-                onClick={() => setShowCreateForm(!showCreateForm)}
-                className="admin-new-group-btn font-body flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-primary transition-all hover:bg-primary/10"
-              >
-                <FolderPlus className="h-3.5 w-3.5" />
-                New group
-              </button>
             </div>
 
-            {/* Create group form */}
+            {/* Create group form — inline at top */}
             {showCreateForm && (
-              <div className="mx-5 mb-3 animate-in fade-in slide-in-from-top-2 duration-200">
-                <div className="creator-group-form flex items-center gap-2 rounded-xl p-2.5">
+              <div className="mb-5 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="creator-group-form flex items-center gap-2.5 rounded-xl p-3">
                   <Input
                     ref={createInputRef}
                     value={newCreatorName}
@@ -707,16 +704,16 @@ export default function AdminPage() {
                         setNewCreatorName("");
                       }
                     }}
-                    placeholder="e.g. Brooke and Riley"
-                    className="admin-input h-8 font-body text-sm"
+                    placeholder="Group name — e.g. Brooke and Riley"
+                    className="admin-input h-9 font-body text-sm"
                   />
                   <Button
                     onClick={createCreator}
                     disabled={isCreatingCreator || !newCreatorName.trim()}
-                    className="admin-button h-8 px-3 font-body text-xs"
+                    className="admin-button-solid h-9 px-4 font-body text-sm"
                   >
                     {isCreatingCreator ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       "Create"
                     )}
@@ -726,305 +723,301 @@ export default function AdminPage() {
                       setShowCreateForm(false);
                       setNewCreatorName("");
                     }}
-                    className="rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground"
+                    className="rounded-md p-1.5 text-muted-foreground transition-colors hover:text-foreground"
                   >
-                    <X className="h-3.5 w-3.5" />
+                    <X className="h-4 w-4" />
                   </button>
                 </div>
               </div>
             )}
 
             {!isHydrated ? (
-              <div className="flex flex-col items-center py-16">
-                <Loader2 className="h-5 w-5 animate-spin text-primary/50" />
-                <p className="font-body mt-3 text-sm text-muted-foreground">
-                  Loading...
+              <div className="flex flex-col items-center py-24">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/50" />
+                <p className="font-body mt-4 text-sm text-muted-foreground">
+                  Loading channels...
                 </p>
               </div>
             ) : curatedChannels.length === 0 ? (
-              <div className="flex flex-col items-center px-5 py-12 text-center">
-                <p className="font-body text-sm text-muted-foreground">
-                  No channels yet. Use the search panel to add channels.
+              <div className="flex flex-col items-center px-8 py-24 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary">
+                  <Tv className="h-6 w-6 text-muted-foreground/50" />
+                </div>
+                <p className="font-body mt-5 text-lg font-semibold text-foreground">
+                  No channels yet
+                </p>
+                <p className="font-body mt-1.5 max-w-sm text-base text-muted-foreground">
+                  Use the search panel on the right to find YouTube channels and
+                  add them to your curated list.
                 </p>
               </div>
             ) : (
-              <ScrollArea className="admin-sidebar-scroll">
-                <div className="space-y-3 px-4 pb-6">
-                  {/* Creator groups */}
-                  {creators.map((creator, creatorIdx) => {
-                    const isExpanded = expandedCreators.has(creator.id);
-                    const accent =
-                      ACCENT_COLORS[creatorIdx % ACCENT_COLORS.length];
-                    const avatar = getCreatorAvatar(creator);
-                    const cover = getCreatorCover(creator);
-                    const channelCount = creator.curated_channels.length;
+              <div className={viewMode === "grid" ? "admin-groups-grid" : "admin-groups-list space-y-3"}>
+                {/* ─── Creator group sections ─── */}
+                {creators.map((creator, creatorIdx) => {
+                  const accent =
+                    ACCENT_COLORS[creatorIdx % ACCENT_COLORS.length];
+                  const avatar = getCreatorAvatar(creator);
+                  const cover = getCreatorCover(creator);
+                  const channelCount = creator.curated_channels.length;
 
-                    return (
-                      <div key={creator.id} className="creator-group group/creator">
-                        {/* Cover strip */}
-                        {cover && isExpanded && (
-                          <div className="relative h-16 w-full overflow-hidden rounded-t-xl">
-                            <Image
-                              src={cover}
-                              alt=""
-                              fill
-                              className="object-cover opacity-40"
-                              sizes="400px"
-                            />
-                            <div
-                              className="absolute inset-0"
-                              style={{
-                                background: `linear-gradient(to top, var(--card), transparent)`,
-                              }}
-                            />
+                  return (
+                    <div
+                      key={creator.id}
+                      className="admin-group-section group/creator"
+                    >
+                      {/* Cover banner — grid mode only */}
+                      {viewMode === "grid" && cover && (
+                        <div className="admin-tile-cover">
+                          <Image
+                            src={cover}
+                            alt=""
+                            fill
+                            className="object-cover opacity-40"
+                            sizes="600px"
+                          />
+                          <div className="admin-tile-cover-fade" />
+                        </div>
+                      )}
+                      {viewMode === "grid" && !cover && (
+                        <div
+                          className="h-1 w-full rounded-t-xl"
+                          style={{
+                            background: `linear-gradient(135deg, color-mix(in srgb, ${accent} 20%, transparent), color-mix(in srgb, ${accent} 5%, transparent))`,
+                          }}
+                        />
+                      )}
+
+                      {/* Group header row — always visible */}
+                      <div className="admin-group-header">
+                        <div className="flex items-center gap-3">
+                          {/* Avatar */}
+                          <button
+                            onClick={() =>
+                              setEditingAvatar(
+                                editingAvatar === creator.id
+                                  ? null
+                                  : creator.id
+                              )
+                            }
+                            className={`group/avatar relative flex-shrink-0 overflow-hidden rounded-full ring-2 ring-border transition-all hover:ring-foreground/25 ${viewMode === "grid" ? "h-11 w-11" : "h-10 w-10"}`}
+                            title="Change avatar source"
+                          >
+                            {avatar ? (
+                              <Image
+                                src={avatar}
+                                alt={creator.name}
+                                fill
+                                className="object-cover"
+                                sizes={viewMode === "grid" ? "44px" : "40px"}
+                              />
+                            ) : (
+                              <div
+                                className="flex h-full w-full items-center justify-center text-sm font-bold text-white"
+                                style={{ background: accent }}
+                              >
+                                {creator.name.charAt(0)}
+                              </div>
+                            )}
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100">
+                              <ImageIcon className="h-3.5 w-3.5 text-white" />
+                            </div>
+                          </button>
+
+                          {/* Name + count */}
+                          <div className="min-w-0 flex-1">
+                            <h3 className={`font-body truncate font-semibold text-foreground ${viewMode === "grid" ? "text-base" : "text-[15px]"}`}>
+                              {creator.name}
+                            </h3>
+                            <p className="font-body text-xs text-muted-foreground">
+                              {channelCount} channel{channelCount !== 1 ? "s" : ""}
+                            </p>
+                          </div>
+
+                          {/* Group-level actions */}
+                          <div className="flex items-center gap-0.5">
+                            {viewMode === "list" && (
+                              <>
+                                <button
+                                  onClick={() => moveCreator(creator.id, "up")}
+                                  disabled={creatorIdx === 0}
+                                  className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-20"
+                                  title="Move up"
+                                >
+                                  <ArrowUp className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => moveCreator(creator.id, "down")}
+                                  disabled={creatorIdx === creators.length - 1}
+                                  className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-20"
+                                  title="Move down"
+                                >
+                                  <ArrowDown className="h-3.5 w-3.5" />
+                                </button>
+                              </>
+                            )}
+                            <button
+                              onClick={() =>
+                                deleteCreator(creator.id, creator.name)
+                              }
+                              className="rounded p-1.5 text-muted-foreground opacity-0 transition-all group-hover/creator:opacity-100 hover:bg-destructive/10 hover:text-destructive"
+                              title="Delete group"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Avatar picker */}
+                      {editingAvatar === creator.id &&
+                        creator.curated_channels.length > 0 && (
+                          <div className="border-b border-border bg-muted/30 px-5 py-3">
+                            <p className="font-body mb-2 text-[11px] tracking-wider text-muted-foreground uppercase">
+                              Choose avatar source
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              {creator.curated_channels.map((cc) => (
+                                <button
+                                  key={cc.id}
+                                  onClick={() =>
+                                    updateCreatorAvatar(
+                                      creator.id,
+                                      cc.channel_id
+                                    )
+                                  }
+                                  className={`relative h-9 w-9 overflow-hidden rounded-full ring-2 transition-all hover:scale-110 ${
+                                    cc.channel_id ===
+                                    creator.avatar_channel_id
+                                      ? "ring-primary"
+                                      : "ring-border hover:ring-foreground/25"
+                                  }`}
+                                  title={cc.channels?.title}
+                                >
+                                  {cc.channels?.thumbnail_url && (
+                                    <Image
+                                      src={cc.channels.thumbnail_url}
+                                      alt={cc.channels.title}
+                                      fill
+                                      className="object-cover"
+                                      sizes="36px"
+                                    />
+                                  )}
+                                </button>
+                              ))}
+                            </div>
                           </div>
                         )}
 
-                        {/* Creator header */}
-                        <div
-                          className="creator-group-header"
-                          style={
-                            {
-                              "--accent": accent,
-                            } as React.CSSProperties
-                          }
-                        >
-                          <div className="flex items-center gap-3">
-                            {/* Reorder — visible on group hover */}
-                            <div className="flex flex-col gap-0.5 opacity-0 transition-opacity group-hover/creator:opacity-100">
-                              <button
-                                onClick={() =>
-                                  moveCreator(creator.id, "up")
-                                }
-                                disabled={creatorIdx === 0}
-                                className="rounded p-0.5 text-muted-foreground transition-colors hover:text-primary disabled:opacity-20"
-                              >
-                                <ArrowUp className="h-3 w-3" />
-                              </button>
-                              <button
-                                onClick={() =>
-                                  moveCreator(creator.id, "down")
-                                }
-                                disabled={creatorIdx === creators.length - 1}
-                                className="rounded p-0.5 text-muted-foreground transition-colors hover:text-primary disabled:opacity-20"
-                              >
-                                <ArrowDown className="h-3 w-3" />
-                              </button>
-                            </div>
-
-                            {/* Avatar */}
-                            <button
-                              onClick={() =>
-                                setEditingAvatar(
-                                  editingAvatar === creator.id
-                                    ? null
-                                    : creator.id
-                                )
-                              }
-                              className="group/avatar relative h-10 w-10 flex-shrink-0 overflow-hidden rounded-full ring-2 transition-all hover:ring-primary/50"
-                              style={{
-                                "--tw-ring-color": accent,
-                              } as React.CSSProperties}
-                              title="Change avatar source"
-                            >
-                              {avatar ? (
-                                <Image
-                                  src={avatar}
-                                  alt={creator.name}
-                                  fill
-                                  className="object-cover"
-                                  sizes="40px"
-                                />
-                              ) : (
-                                <div
-                                  className="flex h-full w-full items-center justify-center text-xs font-bold text-white"
-                                  style={{ background: accent }}
-                                >
-                                  {creator.name.charAt(0)}
-                                </div>
-                              )}
-                              <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100">
-                                <ImageIcon className="h-3.5 w-3.5 text-white" />
-                              </div>
-                            </button>
-
-                            {/* Name + count */}
-                            <button
-                              onClick={() => toggleCreator(creator.id)}
-                              className="min-w-0 flex-1 text-left"
-                            >
-                              <p className="font-heading truncate text-sm text-foreground">
-                                {creator.name}
-                              </p>
-                              <p className="font-body text-[11px] text-muted-foreground">
-                                {channelCount} channel
-                                {channelCount !== 1 ? "s" : ""}
-                              </p>
-                            </button>
-
-                            {/* Actions */}
-                            <div className="flex items-center gap-1">
-                              <button
-                                onClick={() => toggleCreator(creator.id)}
-                                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-primary"
-                              >
-                                {isExpanded ? (
-                                  <ChevronUp className="h-4 w-4" />
-                                ) : (
-                                  <ChevronDown className="h-4 w-4" />
-                                )}
-                              </button>
-                              <button
-                                onClick={() =>
-                                  deleteCreator(creator.id, creator.name)
-                                }
-                                className="rounded-md p-1.5 text-muted-foreground opacity-0 transition-all group-hover/creator:opacity-100 hover:bg-destructive/10 hover:text-destructive"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Avatar picker */}
-                        {editingAvatar === creator.id &&
-                          creator.curated_channels.length > 0 && (
-                            <div className="border-t border-border bg-muted/30 px-3 py-2">
-                              <p className="font-body mb-2 text-[10px] tracking-wider text-muted-foreground uppercase">
-                                Choose avatar source
-                              </p>
-                              <div className="flex flex-wrap gap-2">
-                                {creator.curated_channels.map((cc) => (
-                                  <button
-                                    key={cc.id}
-                                    onClick={() =>
-                                      updateCreatorAvatar(
-                                        creator.id,
-                                        cc.channel_id
-                                      )
-                                    }
-                                    className={`relative h-9 w-9 overflow-hidden rounded-full ring-2 transition-all hover:scale-110 ${
-                                      cc.channel_id ===
-                                      creator.avatar_channel_id
-                                        ? "ring-primary"
-                                        : "ring-border hover:ring-primary/50"
-                                    }`}
-                                    title={cc.channels?.title}
-                                  >
-                                    {cc.channels?.thumbnail_url && (
-                                      <Image
-                                        src={cc.channels.thumbnail_url}
-                                        alt={cc.channels.title}
-                                        fill
-                                        className="object-cover"
-                                        sizes="36px"
-                                      />
-                                    )}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                        {/* Expanded channels */}
-                        {isExpanded && (
-                          <div className="space-y-1 px-2 pb-2 pt-1">
-                            {creator.curated_channels.length === 0 ? (
-                              <p className="font-body py-4 text-center text-xs text-muted-foreground">
-                                No channels in this group yet
-                              </p>
-                            ) : (
-                              creator.curated_channels.map((cc) => {
+                      {/* Channel list */}
+                      <div className="admin-group-channels">
+                          {creator.curated_channels.length === 0 ? (
+                            <p className="font-body py-5 text-center text-sm text-muted-foreground">
+                              No channels — search and add some!
+                            </p>
+                          ) : (
+                            <div>
+                              {creator.curated_channels.map((cc) => {
                                 const ch = rowToChannel(cc);
                                 return (
-                                  <CuratedChannelCard
+                                  <ChannelRow
                                     key={cc.id}
                                     channel={ch}
                                     curatedId={cc.id}
                                     onRemove={removeChannel}
-                                    onToggleVideos={toggleVideos}
-                                    expandedChannel={expandedChannel}
-                                    loadingVideos={loadingVideos}
-                                    channelVideos={channelVideos}
                                     creators={creators}
                                     onAssign={assignChannelToCreator}
                                     showUngroup
                                   />
                                 );
-                              })
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-
-                  {/* Ungrouped section */}
-                  {ungroupedChannels.length > 0 && (
-                    <div>
-                      {creators.length > 0 && (
-                        <div className="flex items-center gap-2 px-1 py-2">
-                          <Ungroup className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="font-body text-[11px] tracking-wider text-muted-foreground uppercase">
-                            Ungrouped ({ungroupedChannels.length})
-                          </span>
-                          <div className="h-px flex-1 bg-border" />
+                              })}
+                            </div>
+                          )}
                         </div>
-                      )}
-                      <div className="space-y-1">
-                        {ungroupedChannels.map((cc) => {
-                          const ch = rowToChannel(cc);
-                          return (
-                            <CuratedChannelCard
-                              key={cc.id}
-                              channel={ch}
-                              curatedId={cc.id}
-                              onRemove={removeChannel}
-                              onToggleVideos={toggleVideos}
-                              expandedChannel={expandedChannel}
-                              loadingVideos={loadingVideos}
-                              channelVideos={channelVideos}
-                              creators={creators}
-                              onAssign={assignChannelToCreator}
-                              showUngroup={false}
-                            />
-                          );
-                        })}
+                    </div>
+                  );
+                })}
+
+                {/* ─── Ungrouped channels section ─── */}
+                {ungroupedChannels.length > 0 && (
+                  <div className="admin-group-section admin-group-ungrouped">
+                    <div className="admin-group-header">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-4 w-4 items-center justify-center">
+                          <Ungroup className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-muted ring-2 ring-border">
+                          <Ungroup className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-baseline gap-2">
+                            <h3 className="font-body text-[15px] font-semibold text-muted-foreground">
+                              Ungrouped
+                            </h3>
+                            <span className="font-body text-xs text-muted-foreground">
+                              {ungroupedChannels.length} ch — assign to a group
+                            </span>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  )}
+                    <div className="admin-group-channels">
+                      {ungroupedChannels.map((cc) => {
+                        const ch = rowToChannel(cc);
+                        return (
+                          <ChannelRow
+                            key={cc.id}
+                            channel={ch}
+                            curatedId={cc.id}
+                            onRemove={removeChannel}
+                            onToggleVideos={toggleVideos}
+                            expandedChannel={expandedChannel}
+                            loadingVideos={loadingVideos}
+                            channelVideos={channelVideos}
+                            creators={creators}
+                            onAssign={assignChannelToCreator}
+                            showUngroup={false}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
-                  {/* No groups and no ungrouped — everything is in groups */}
-                  {creators.length > 0 && ungroupedChannels.length === 0 && (
-                    <p className="font-body py-2 text-center text-xs text-muted-foreground">
+                {/* All grouped message */}
+                {creators.length > 0 &&
+                  ungroupedChannels.length === 0 &&
+                  curatedChannels.length > 0 && (
+                    <div className="font-body py-3 text-center text-sm text-muted-foreground">
                       All channels are grouped
-                    </p>
+                    </div>
                   )}
-                </div>
-              </ScrollArea>
+              </div>
             )}
           </div>
-        </aside>
+        </main>
 
-        {/* Right panel — Discovery */}
-        <main className="admin-main">
-          <div className="mx-auto max-w-2xl px-8 py-8 lg:px-12 lg:py-10">
-            {/* Section header with integrated mode toggle */}
-            <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <h2 className="font-heading text-2xl tracking-tight text-foreground">
-                  Discover channels
-                </h2>
-                <p className="font-body mt-1 text-sm text-muted-foreground">
-                  Add by URL, handle, or search by name
-                </p>
-              </div>
+        {/* ── RIGHT: Search sidebar ── */}
+        <aside
+          className={`admin-search-sidebar transition-all duration-200 ${sidebarOpen ? "" : "admin-search-sidebar-hidden"}`}
+        >
+          <div className="sticky top-0">
+            {/* Sidebar header */}
+            <div className="flex items-center justify-between px-4 pt-4 pb-2">
+              <h2 className="font-body text-sm font-semibold text-foreground">
+                Add channels
+              </h2>
+              <p className="font-body text-xs text-muted-foreground">
+                URL, handle, or search
+              </p>
+            </div>
 
-              {/* Segmented mode toggle */}
-              <div className="admin-segmented-toggle inline-flex rounded-lg p-0.5">
+            {/* Mode toggle */}
+            <div className="px-4 pb-2.5">
+              <div className="admin-segmented-toggle inline-flex w-full rounded-lg p-0.5">
                 <button
                   onClick={() => setMode("lookup")}
-                  className={`admin-segment font-body rounded-md px-3.5 py-1.5 text-xs font-semibold transition-all ${
+                  className={`admin-segment font-body flex-1 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-all ${
                     mode === "lookup"
                       ? "active"
                       : "text-muted-foreground hover:text-foreground"
@@ -1034,7 +1027,7 @@ export default function AdminPage() {
                 </button>
                 <button
                   onClick={() => setMode("search")}
-                  className={`admin-segment font-body rounded-md px-3.5 py-1.5 text-xs font-semibold transition-all ${
+                  className={`admin-segment font-body flex-1 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-all ${
                     mode === "search"
                       ? "active"
                       : "text-muted-foreground hover:text-foreground"
@@ -1045,10 +1038,10 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* Search bar */}
-            <div className="flex gap-2.5">
+            {/* Search input */}
+            <div className="flex gap-2 px-4 pb-4">
               <div className="relative flex-1">
-                <Search className="absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Search className="absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
@@ -1058,85 +1051,73 @@ export default function AdminPage() {
                     }
                   }}
                   placeholder={
-                    mode === "lookup"
-                      ? "Paste a URL or handle — e.g. @FunQuesters"
-                      : "Search for kid-friendly channels..."
+                    mode === "lookup" ? "@handle or URL" : "Channel name..."
                   }
-                  className="admin-input h-11 pl-10 font-body"
+                  className="admin-input h-9 pl-8 font-body text-sm"
                 />
               </div>
               <Button
                 onClick={mode === "lookup" ? handleLookup : handleSearch}
                 disabled={isLoading || isSearching || !searchInput.trim()}
-                className="admin-button-solid h-11 px-5 font-body font-semibold"
+                className="admin-button-solid h-9 w-9 p-0 font-body text-sm"
               >
                 {isLoading || isSearching ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : mode === "lookup" ? (
-                  "Look up"
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  "Search"
+                  <Search className="h-3.5 w-3.5" />
                 )}
               </Button>
             </div>
 
-            {/* Lookup Result */}
-            {lookupResult && (
-              <div className="mt-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <ChannelCard
-                  channel={lookupResult}
-                  onAdd={addChannel}
-                  isCurated={isCurated(lookupResult.id)}
-                />
-              </div>
-            )}
+            {/* Search results */}
+            <ScrollArea className="admin-search-results">
+              <div className="space-y-2 px-4 pb-4">
+                {/* Lookup result */}
+                {lookupResult && (
+                  <div className="animate-in fade-in slide-in-from-top-2 duration-200">
+                    <SearchResultCard
+                      channel={lookupResult}
+                      onAdd={addChannel}
+                      isCurated={isCurated(lookupResult.id)}
+                    />
+                  </div>
+                )}
 
-            {/* Search Results */}
-            {searchResults.length > 0 && (
-              <div className="mt-6 space-y-3">
-                <p className="font-body text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-                  {searchResults.length} channels found
-                </p>
+                {/* Search results */}
                 {searchResults.map((channel, i) => (
                   <div
                     key={channel.id}
-                    className="animate-in fade-in slide-in-from-bottom-2"
-                    style={{ animationDelay: `${i * 60}ms` }}
+                    className="animate-in fade-in slide-in-from-top-2"
+                    style={{ animationDelay: `${i * 40}ms` }}
                   >
-                    <ChannelCard
+                    <SearchResultCard
                       channel={channel}
                       onAdd={addChannel}
                       isCurated={isCurated(channel.id)}
-                      compact
                     />
                   </div>
                 ))}
-              </div>
-            )}
 
-            {/* Empty state — compact */}
-            {!lookupResult &&
-              searchResults.length === 0 &&
-              !isLoading &&
-              !isSearching && (
-                <div className="mt-10 flex items-start gap-4 rounded-xl border border-dashed border-border p-5">
-                  <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-primary/8">
-                    <Search className="h-4 w-4 text-primary/50" />
-                  </div>
-                  <div>
-                    <p className="font-heading text-sm text-foreground">
-                      Find channels to curate
-                    </p>
-                    <p className="font-body mt-0.5 text-sm leading-relaxed text-muted-foreground">
-                      Paste a YouTube channel URL, type a handle like{" "}
-                      <span className="font-semibold text-primary">@FunQuesters</span>, or
-                      switch to search mode to browse by name.
-                    </p>
-                  </div>
-                </div>
-              )}
+                {/* Empty state */}
+                {!lookupResult &&
+                  searchResults.length === 0 &&
+                  !isLoading &&
+                  !isSearching && (
+                    <div className="flex flex-col items-center px-3 py-8 text-center">
+                      <Search className="h-5 w-5 text-muted-foreground/30" />
+                      <p className="font-body mt-3 text-xs leading-relaxed text-muted-foreground">
+                        Paste a YouTube URL, type{" "}
+                        <span className="font-semibold text-foreground">
+                          @handle
+                        </span>
+                        , or search by name
+                      </p>
+                    </div>
+                  )}
+              </div>
+            </ScrollArea>
           </div>
-        </main>
+        </aside>
       </div>
     </div>
   );
@@ -1144,14 +1125,162 @@ export default function AdminPage() {
 
 // ─── Sub-Components ──────────────────────────────────────────────────────────
 
-function CuratedChannelCard({
+/** Inline move-to-group dropdown — replaces the broken native select */
+function MoveToGroupDropdown({
+  curatedId,
+  currentCreatorId,
+  channelTitle,
+  creators,
+  onAssign,
+  showUngroup,
+}: {
+  curatedId: string;
+  currentCreatorId: string | null;
+  channelTitle: string;
+  creators: Creator[];
+  onAssign: (
+    curatedId: string,
+    creatorId: string | null,
+    title: string
+  ) => void;
+  showUngroup: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number; flipUp: boolean }>({ top: 0, left: 0, flipUp: false });
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node) &&
+        buttonRef.current &&
+        !buttonRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  // Close on Escape or scroll
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    const onScroll = () => setOpen(false);
+    document.addEventListener("keydown", onKey);
+    const scrollParent = buttonRef.current?.closest('.admin-main-v2');
+    scrollParent?.addEventListener("scroll", onScroll);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      scrollParent?.removeEventListener("scroll", onScroll);
+    };
+  }, [open]);
+
+  // Calculate position and open
+  const handleOpen = () => {
+    if (!open && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const flipUp = spaceBelow < 300;
+      setPos({
+        top: flipUp ? rect.top : rect.bottom + 4,
+        left: rect.right,
+        flipUp,
+      });
+    }
+    setOpen(!open);
+  };
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        ref={buttonRef}
+        onClick={handleOpen}
+        className="admin-move-btn rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+        title="Reassign to group"
+      >
+        <FolderInput className="h-3.5 w-3.5" />
+      </button>
+
+      {open && createPortal(
+        <div
+          ref={dropdownRef}
+          className="admin-move-dropdown fixed z-[100] min-w-[200px]"
+          style={{
+            top: pos.flipUp ? undefined : pos.top,
+            bottom: pos.flipUp ? window.innerHeight - pos.top + 4 : undefined,
+            left: pos.left,
+            transform: 'translateX(-100%)',
+          }}
+        >
+          <div className="rounded-xl border border-border bg-popover p-1.5 shadow-lg">
+            <p className="font-body px-2.5 py-1.5 text-[10px] tracking-wider text-muted-foreground uppercase">
+              Move to
+            </p>
+            {/* Ungroup option */}
+            <button
+              onClick={() => {
+                onAssign(curatedId, null, channelTitle);
+                setOpen(false);
+              }}
+              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left font-body text-sm transition-colors hover:bg-secondary ${
+                currentCreatorId === null
+                  ? "text-foreground font-semibold"
+                  : "text-foreground"
+              }`}
+            >
+              <Ungroup className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+              <span className="truncate">Ungrouped</span>
+              {currentCreatorId === null && (
+                <Check className="ml-auto h-3.5 w-3.5 flex-shrink-0 text-primary" />
+              )}
+            </button>
+
+            {creators.length > 0 && (
+              <div className="my-1 border-t border-border" />
+            )}
+
+            {/* Creator options (sorted alphabetically) */}
+            {[...creators].sort((a, b) => a.name.localeCompare(b.name)).map((creator) => (
+              <button
+                key={creator.id}
+                onClick={() => {
+                  onAssign(curatedId, creator.id, channelTitle);
+                  setOpen(false);
+                }}
+                className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left font-body text-sm transition-colors hover:bg-secondary ${
+                  currentCreatorId === creator.id
+                    ? "text-foreground font-semibold"
+                    : "text-foreground"
+                }`}
+              >
+                <FolderPlus className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                <span className="truncate">{creator.name}</span>
+                {currentCreatorId === creator.id && (
+                  <Check className="ml-auto h-3.5 w-3.5 flex-shrink-0 text-primary" />
+                )}
+              </button>
+            ))}
+          </div>
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
+
+/** Compact channel row for inside group sections */
+function ChannelRow({
   channel,
   curatedId,
   onRemove,
-  onToggleVideos,
-  expandedChannel,
-  loadingVideos,
-  channelVideos,
   creators,
   onAssign,
   showUngroup,
@@ -1159,10 +1288,6 @@ function CuratedChannelCard({
   channel: Channel & { curatedId: string; creatorId: string | null };
   curatedId: string;
   onRemove: (channelId: string) => void;
-  onToggleVideos: (channelId: string) => void;
-  expandedChannel: string | null;
-  loadingVideos: string | null;
-  channelVideos: Record<string, Video[]>;
   creators: Creator[];
   onAssign: (
     curatedId: string,
@@ -1172,226 +1297,143 @@ function CuratedChannelCard({
   showUngroup: boolean;
 }) {
   return (
-    <Card className="curated-card group border-0 p-0">
-      <div className="flex items-center gap-2.5 p-2.5">
-        <div className="relative h-9 w-9 flex-shrink-0 overflow-hidden rounded-lg ring-1 ring-border">
+    <div className="channel-row group/ch">
+      <div className="flex gap-2.5 px-4 py-2">
+        {/* Thumbnail spanning both rows */}
+        <div className="relative h-8 w-8 flex-shrink-0 overflow-hidden rounded-md ring-1 ring-border">
           <Image
             src={channel.thumbnailUrl}
             alt={channel.title}
             fill
             className="object-cover"
-            sizes="36px"
+            sizes="32px"
           />
         </div>
+
+        {/* Right side: name on top, stats+actions below */}
         <div className="min-w-0 flex-1">
-          <p className="font-heading truncate text-[13px] text-foreground">
+          <p className="font-body truncate text-sm leading-none font-medium text-foreground">
             {channel.title}
           </p>
-          <p className="font-body text-[11px] text-muted-foreground">
-            {formatCount(channel.subscriberCount)} subs
-          </p>
-        </div>
-        <div className="flex items-center gap-0.5">
-          {/* Move to group — native select with icon overlay */}
-          <div className="relative flex items-center justify-center">
-            <FolderPlus className="pointer-events-none absolute h-3.5 w-3.5 text-muted-foreground" />
-            <select
-              value={channel.creatorId || ""}
-              onChange={(e) => {
-                const val = e.target.value;
-                onAssign(
-                  curatedId,
-                  val === "" ? null : val,
-                  channel.title
-                );
-              }}
-              className="assign-select font-body h-7 w-7 cursor-pointer appearance-none rounded-md bg-transparent p-0 text-transparent opacity-0 transition-colors hover:bg-secondary hover:opacity-100"
-              title={showUngroup ? "Ungroup or move" : "Move to group"}
-            >
-              <option value="">Ungrouped</option>
-              {creators.map((creator) => (
-                <option key={creator.id} value={creator.id}>
-                  {creator.name}
-                </option>
-              ))}
-            </select>
+          <div className="mt-0.5 flex items-center gap-2 leading-none">
+          <div className="font-body flex items-center gap-2 text-xs text-muted-foreground">
+            <span>{formatCount(channel.subscriberCount)} subs</span>
+            <span>·</span>
+            <span>{formatCount(channel.videoCount)} vids</span>
           </div>
-          <button
-            onClick={() => onToggleVideos(channel.id)}
-            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-primary"
+          <div className="ml-auto flex shrink-0 items-center gap-0.5">
+          {/* Move to group dropdown */}
+          <MoveToGroupDropdown
+            curatedId={curatedId}
+            currentCreatorId={channel.creatorId}
+            channelTitle={channel.title}
+            creators={creators}
+            onAssign={onAssign}
+            showUngroup={showUngroup}
+          />
+
+          {/* YouTube link */}
+          <a
+            href={`https://www.youtube.com/${channel.customUrl}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            title="Open on YouTube"
           >
-            {expandedChannel === channel.id ? (
-              <ChevronUp className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronDown className="h-3.5 w-3.5" />
-            )}
-          </button>
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+
+          {/* Remove */}
           <button
             onClick={() => onRemove(channel.id)}
             className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+            title="Remove channel"
           >
-            <Trash2 className="h-3 w-3" />
+            <Trash2 className="h-3.5 w-3.5" />
           </button>
+          </div>
+        </div>
         </div>
       </div>
 
-      {/* Expanded videos */}
-      {expandedChannel === channel.id && (
-        <div className="border-t border-border bg-muted/50 px-3 pb-3 pt-2">
-          {loadingVideos === channel.id ? (
-            <div className="flex items-center justify-center py-6">
-              <Loader2 className="h-4 w-4 animate-spin text-primary/50" />
-            </div>
-          ) : channelVideos[channel.id]?.length ? (
-            <div className="space-y-2">
-              <p className="font-body text-[10px] tracking-wider text-muted-foreground uppercase">
-                Recent uploads
-              </p>
-              {channelVideos[channel.id].slice(0, 5).map((video) => (
-                <a
-                  key={video.id}
-                  href={`https://www.youtube.com/watch?v=${video.id}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group/vid flex gap-2.5 rounded-md p-1.5 transition-colors hover:bg-secondary"
-                >
-                  <div className="relative h-12 w-20 flex-shrink-0 overflow-hidden rounded">
-                    <Image
-                      src={video.thumbnailUrl}
-                      alt={video.title}
-                      fill
-                      className="object-cover"
-                      sizes="80px"
-                    />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-body line-clamp-2 text-xs text-foreground/80 transition-colors group-hover/vid:text-foreground">
-                      {video.title}
-                    </p>
-                    <p className="font-body mt-0.5 text-[10px] text-muted-foreground">
-                      {new Date(video.publishedAt).toLocaleDateString()}
-                    </p>
-                  </div>
-                </a>
-              ))}
-            </div>
-          ) : (
-            <p className="font-body py-4 text-center text-xs text-muted-foreground">
-              No recent videos found
-            </p>
-          )}
-        </div>
-      )}
-    </Card>
+    </div>
   );
 }
 
-function ChannelCard({
+/** Compact search result card for sidebar */
+function SearchResultCard({
   channel,
   onAdd,
   isCurated,
-  compact = false,
 }: {
   channel: Channel;
   onAdd: (channel: Channel) => void;
   isCurated: boolean;
-  compact?: boolean;
 }) {
   return (
-    <Card
-      className={`channel-result-card overflow-hidden border-0 p-0 ${compact ? "" : ""}`}
-    >
-      {!compact && channel.bannerUrl && (
-        <div className="relative h-28 w-full overflow-hidden">
-          <Image
-            src={channel.bannerUrl}
-            alt=""
-            fill
-            className="object-cover opacity-60"
-            sizes="(max-width: 768px) 100vw, 60vw"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-card to-transparent" />
-        </div>
-      )}
-
-      <div className={`flex gap-4 ${compact ? "p-4" : "relative -mt-6 p-5"}`}>
-        <div
-          className={`relative flex-shrink-0 overflow-hidden rounded-xl ring-2 ring-primary/20 ${compact ? "h-12 w-12" : "h-16 w-16"}`}
-        >
+    <Card className="search-result-card border-0 p-0">
+      <div className="flex items-center gap-3 p-3">
+        {/* Thumbnail */}
+        <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg ring-1 ring-border">
           <Image
             src={channel.thumbnailUrl}
             alt={channel.title}
             fill
             className="object-cover"
-            sizes={compact ? "48px" : "64px"}
+            sizes="40px"
           />
         </div>
 
+        {/* Info */}
         <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h3
-                className={`font-heading text-foreground ${compact ? "text-sm" : "text-lg"}`}
-              >
-                {channel.title}
-              </h3>
-              <div className="mt-0.5 flex items-center gap-2">
-                <span className="font-body text-xs text-primary">
-                  {channel.customUrl}
-                </span>
-                <a
-                  href={`https://www.youtube.com/${channel.customUrl}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-muted-foreground transition-colors hover:text-primary"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                </a>
-              </div>
-            </div>
-
-            <Button
-              size="sm"
-              onClick={() => onAdd(channel)}
-              disabled={isCurated}
-              className={`font-body flex-shrink-0 ${
-                isCurated
-                  ? "cursor-default border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                  : "admin-button"
-              }`}
+          <h4 className="font-body truncate text-sm font-medium text-foreground">
+            {channel.title}
+          </h4>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            <span className="font-body truncate text-xs text-muted-foreground">
+              {channel.customUrl}
+            </span>
+            <a
+              href={`https://www.youtube.com/${channel.customUrl}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-shrink-0 text-muted-foreground transition-colors hover:text-foreground"
             >
-              {isCurated ? (
-                "Added"
-              ) : (
-                <>
-                  <Plus className="mr-1 h-3.5 w-3.5" />
-                  Add
-                </>
-              )}
-            </Button>
+              <ExternalLink className="h-3 w-3" />
+            </a>
           </div>
-
-          {!compact && (
-            <p className="font-body mt-2 line-clamp-2 text-sm text-muted-foreground">
-              {channel.description}
-            </p>
-          )}
-
-          <div className="mt-2 flex gap-4">
-            <span className="font-body flex items-center gap-1.5 text-xs text-muted-foreground">
+          <div className="font-body mt-1 flex gap-3 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1">
               <Users className="h-3 w-3" />
               {formatCount(channel.subscriberCount)}
             </span>
-            <span className="font-body flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1">
               <Film className="h-3 w-3" />
               {formatCount(channel.videoCount)}
             </span>
-            <span className="font-body flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Eye className="h-3 w-3" />
-              {formatCount(channel.viewCount)}
-            </span>
           </div>
         </div>
+
+        {/* Add button */}
+        <Button
+          size="sm"
+          onClick={() => onAdd(channel)}
+          disabled={isCurated}
+          className={`h-8 px-3 font-body text-xs ${
+            isCurated
+              ? "cursor-default border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+              : "admin-button-solid"
+          }`}
+        >
+          {isCurated ? (
+            <Check className="h-3.5 w-3.5" />
+          ) : (
+            <>
+              <Plus className="mr-0.5 h-3 w-3" />
+              Add
+            </>
+          )}
+        </Button>
       </div>
     </Card>
   );

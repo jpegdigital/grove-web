@@ -145,20 +145,20 @@ function CreatorCard({
   return (
     <div className="creator-card group relative flex flex-col items-center text-center overflow-hidden rounded-3xl border border-border/40 bg-card transition-all duration-300 hover:border-border hover:shadow-2xl hover:shadow-primary/8 hover:-translate-y-1.5">
       {/* Cover / gradient band */}
-      <div className="relative w-full h-24 sm:h-28 overflow-hidden shrink-0">
-        {cover ? (
-          <Image
-            src={cover}
-            alt=""
-            fill
-            className="object-cover object-center transition-transform duration-500 group-hover:scale-105"
-            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-            priority={priority}
-          />
-        ) : (
-          <div className={`absolute inset-0 bg-gradient-to-br ${accent.gradient} opacity-90`} />
-        )}
-        <div className="absolute inset-0 bg-gradient-to-t from-card via-card/20 to-transparent" />
+      <div className="relative w-full h-24 sm:h-28 shrink-0">
+        <div className={`absolute inset-0 overflow-hidden bg-gradient-to-br ${accent.gradient}`}>
+          {cover ? (
+            <Image
+              src={cover}
+              alt=""
+              fill
+              className="object-cover object-center scale-125 transition-transform duration-500 group-hover:scale-[1.35]"
+              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+              priority={priority}
+            />
+          ) : null}
+        </div>
+        <div className="absolute top-0 left-0 right-0 -bottom-2 bg-gradient-to-t from-card via-card/60 to-transparent" />
       </div>
 
       {/* Big avatar — overlaps the cover */}
@@ -198,7 +198,7 @@ function CreatorCard({
         )}
 
         {/* Channel avatars row — small circular thumbnails */}
-        {channelCount > 1 && (
+        {channelCount >= 1 && (
           <div className="flex items-center -space-x-2 mt-1">
             {creator.curated_channels.slice(0, 5).map((cc) => (
               <div
@@ -253,13 +253,13 @@ function UngroupedChannelCard({
 
   return (
     <div className="creator-card group relative flex flex-col items-center text-center overflow-hidden rounded-3xl border border-border/40 bg-card transition-all duration-300 hover:border-border hover:shadow-2xl hover:shadow-primary/8 hover:-translate-y-1.5">
-      <div className="relative w-full h-24 sm:h-28 overflow-hidden shrink-0">
-        {ch.banner_url ? (
-          <Image src={ch.banner_url} alt="" fill className="object-cover object-center transition-transform duration-500 group-hover:scale-105" sizes="(max-width: 640px) 100vw, 50vw" />
-        ) : (
-          <div className={`absolute inset-0 bg-gradient-to-br ${accent.gradient} opacity-90`} />
-        )}
-        <div className="absolute inset-0 bg-gradient-to-t from-card via-card/20 to-transparent" />
+      <div className="relative w-full h-24 sm:h-28 shrink-0">
+        <div className={`absolute inset-0 overflow-hidden bg-gradient-to-br ${accent.gradient}`}>
+          {ch.banner_url ? (
+            <Image src={ch.banner_url} alt="" fill className="object-cover object-center scale-125 transition-transform duration-500 group-hover:scale-[1.35]" sizes="(max-width: 640px) 100vw, 50vw" />
+          ) : null}
+        </div>
+        <div className="absolute top-0 left-0 right-0 -bottom-2 bg-gradient-to-t from-card via-card/60 to-transparent" />
       </div>
 
       <div className="-mt-14 relative z-10 shrink-0">
@@ -295,7 +295,9 @@ export default function Home() {
     queryFn: fetchCreators,
   });
 
-  const creators = data?.creators ?? [];
+  const creators = [...(data?.creators ?? [])].sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
   const ungrouped = data?.ungrouped ?? [];
   const totalCreators = creators.length + ungrouped.length;
 
