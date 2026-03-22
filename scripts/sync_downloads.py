@@ -53,40 +53,116 @@ def parse_upload_date(raw: str | None) -> str | None:
         return None
 
 
+def _build_dir_cache(folder: Path) -> list[str]:
+    """List a directory once and cache filenames. Uses os.scandir for speed on Windows."""
+    try:
+        return [entry.name for entry in os.scandir(folder)]
+    except OSError:
+        return []
+
+
+# Module-level cache: folder path → list of filenames
+_dir_cache: dict[Path, list[str]] = {}
+
+
+def _get_dir_files(folder: Path) -> list[str]:
+    """Return cached directory listing, populating on first access."""
+    if folder not in _dir_cache:
+        _dir_cache[folder] = _build_dir_cache(folder)
+    return _dir_cache[folder]
+
+
 def find_sibling(folder: Path, video_id: str, extensions: set[str]) -> str | None:
     """Find a sibling file matching video_id with one of the given extensions."""
+    filenames = _get_dir_files(folder)
+
+    # Check exact match first
     for ext in extensions:
-        # Check exact match first
-        candidate = folder / f"{video_id}{ext}"
-        if candidate.exists():
-            return candidate.name
-    # Also check for files that start with video_id (e.g. VIDEO_ID.en.srt)
-    for f in folder.iterdir():
-        if f.name.startswith(video_id) and f.suffix in extensions and not f.name.endswith(".info.json"):
-            return f.name
+        target = f"{video_id}{ext}"
+        if target in filenames:
+            return target
+
+    # Prefix match (e.g. VIDEO_ID.en.srt)
+    for name in filenames:
+        if name.startswith(video_id) and not name.endswith(".info.json"):
+            suffix = Path(name).suffix
+            if suffix in extensions:
+                return name
     return None
 
 
-def scan_media_directory(media_dir: Path) -> list[dict]:
+def _walk_info_json(media_dir: Path) -> list[Path]:
+    """Recursively find *.info.json using os.scandir (much faster than rglob on Windows)."""
+    results: list[Path] = []
+    stack = [media_dir]
+    while stack:
+        current = stack.pop()
+        try:
+            entries = list(os.scandir(current))
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.is_dir(follow_symlinks=False):
+                stack.append(Path(entry.path))
+            elif entry.name.endswith(".info.json"):
+                results.append(Path(entry.path))
+    results.sort()
+    return results
+
+
+def fetch_existing_video_ids(client) -> set[str]:
+    """Fetch all youtube_ids already in the videos table for incremental sync."""
+    existing: set[str] = set()
+    page_size = 1000
+    offset = 0
+    while True:
+        resp = (
+            client.table("videos")
+            .select("youtube_id")
+            .eq("is_downloaded", True)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        if not resp.data:
+            break
+        for row in resp.data:
+            existing.add(row["youtube_id"])
+        if len(resp.data) < page_size:
+            break
+        offset += page_size
+    return existing
+
+
+def scan_media_directory(media_dir: Path, skip_ids: set[str] | None = None) -> list[dict]:
     """Walk MEDIA_DIR/@handle/YYYY-MM/*.info.json and extract metadata."""
     rows = []
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    info_files = sorted(media_dir.rglob("*.info.json"))
+    info_files = _walk_info_json(media_dir)
     total = len(info_files)
+    skipped = 0
     print(f"  Found {total} .info.json file(s)")
 
     for i, info_path in enumerate(info_files, 1):
+        # Extract video ID from filename (VIDEO_ID.info.json) — skip before parsing
+        video_id = info_path.name.removesuffix(".info.json")
+
+        if skip_ids and video_id in skip_ids:
+            skipped += 1
+            if i % 50 == 0 or i == total:
+                print(f"  Scanned {i}/{total} ({skipped} skipped, already synced)")
+            continue
+
         try:
             data = json.loads(info_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             print(f"  Warning: failed to parse {info_path}: {e}")
             continue
 
-        video_id = data.get("id")
-        if not video_id:
-            print(f"  Warning: no 'id' field in {info_path}, skipping")
-            continue
+        # Validate ID from file content matches filename
+        file_video_id = data.get("id")
+        if file_video_id:
+            video_id = file_video_id
 
         channel_id = data.get("channel_id", "")
         if not channel_id:
@@ -154,8 +230,9 @@ def scan_media_directory(media_dir: Path) -> list[dict]:
         rows.append(row)
 
         if i % 50 == 0 or i == total:
-            print(f"  Scanned {i}/{total}")
+            print(f"  Scanned {i}/{total} ({skipped} skipped, already synced)")
 
+    _dir_cache.clear()  # Free memory after scan
     return rows
 
 
@@ -220,6 +297,8 @@ def upsert_videos(client, rows: list[dict]):
 def main():
     load_env()
 
+    full_resync = "--full" in sys.argv
+
     supabase_url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
     supabase_key = os.environ.get("SUPABASE_SECRET_KEY")
     media_directory = os.environ.get("MEDIA_DIRECTORY", "E:/Entertainment/PradoTube")
@@ -235,20 +314,28 @@ def main():
 
     client = create_client(supabase_url, supabase_key)
 
-    print(f"Scanning media directory: {media_dir}")
-    rows = scan_media_directory(media_dir)
+    skip_ids: set[str] | None = None
+    if not full_resync:
+        print("Fetching already-synced video IDs (use --full to force full rescan)...")
+        skip_ids = fetch_existing_video_ids(client)
+        print(f"  {len(skip_ids)} video(s) already synced, will skip them")
+    else:
+        print("Full resync mode: re-processing all videos")
+
+    print(f"\nScanning media directory: {media_dir}")
+    rows = scan_media_directory(media_dir, skip_ids=skip_ids)
 
     if not rows:
-        print("  No downloaded videos found. Nothing to sync.")
+        print("  No new downloaded videos found. Nothing to sync.")
         return
 
     print(f"\nEnsuring channels exist...")
     ensure_channels_exist(client, rows)
 
-    print(f"\nUpserting {len(rows)} video(s) to Supabase...")
+    print(f"\nUpserting {len(rows)} new video(s) to Supabase...")
     upsert_videos(client, rows)
 
-    print(f"\nDone! Synced {len(rows)} downloaded video(s).")
+    print(f"\nDone! Synced {len(rows)} new video(s).")
 
 
 if __name__ == "__main__":
