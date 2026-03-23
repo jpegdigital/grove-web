@@ -5,6 +5,8 @@ requires-python = ">=3.10"
 dependencies = [
     "supabase",
     "pyyaml",
+    "requests",
+    "boto3>=1.42.74",
 ]
 
 [tool.uv]

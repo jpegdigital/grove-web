@@ -13,7 +13,10 @@ Kid-friendly curated YouTube feed. Next.js 16 + Supabase + ytdl-sub.
 | `npm run dev` | Start dev server |
 | `npm run build` | Production build |
 | `npm run lint` | ESLint |
-| `uv run python scripts/sync_downloads.py` | Scan ytdl-sub downloads into Supabase |
+| `uv run python scripts/sync_downloads.py` | Scan ytdl-sub downloads into Supabase + upload to R2 |
+| `uv run python scripts/sync_downloads.py --limit 50` | Upload up to 50 videos to R2 per run |
+| `uv run python scripts/sync_downloads.py --skip-r2` | DB sync only (skip R2 upload) |
+| `uv run python scripts/sync_downloads.py --purge` | Delete local files after R2 upload (opt-in) |
 | `uv run python scripts/sync_subscriptions.py` | Sync YouTube channel metadata |
 
 ## Architecture
@@ -21,7 +24,7 @@ Kid-friendly curated YouTube feed. Next.js 16 + Supabase + ytdl-sub.
 ```
 src/
   app/              # Next.js App Router pages + API routes
-    api/            # REST endpoints (videos, channels, creators, youtube, media)
+    api/            # REST endpoints (videos, channels, creators, youtube)
     admin/          # Admin panel for managing creators/channels
     c/[slug]/       # Creator-filtered feed
     v/[id]/         # Video player
@@ -38,8 +41,8 @@ specs/              # Feature specs and plans
 
 `creators` → `curated_channels` → `channels` → `videos`
 - Feed uses round-robin interleaving per channel, grouped by creator
-- Videos served only when `is_downloaded = true` (synced from ytdl-sub library)
-- `/api/media/[...path]` streams local files with range request support
+- Videos served only when `r2_synced_at IS NOT NULL` (uploaded to Cloudflare R2)
+- Media URLs constructed as `${NEXT_PUBLIC_R2_PUBLIC_URL}/${media_path}` (direct R2 CDN)
 
 ## Code Style
 
@@ -57,12 +60,17 @@ specs/              # Feature specs and plans
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — Client-side key
 - `SUPABASE_SECRET_KEY` — Server-side secret
 - `DATABASE_URL` — Postgres connection string
+- `R2_ACCOUNT_ID` — Cloudflare account ID (Python scripts)
+- `R2_ACCESS_KEY_ID` — R2 API token access key (Python scripts)
+- `R2_SECRET_ACCESS_KEY` — R2 API token secret (Python scripts)
+- `R2_BUCKET_NAME` — R2 bucket name (Python scripts)
+- `NEXT_PUBLIC_R2_PUBLIC_URL` — R2 public URL for media (frontend)
 
 ## Gotchas
 
 - **Python = uv run.** No exceptions. No naked python/pip.
 - RLS is permissive (single-user POC) — all tables allow full CRUD via publishable key
 - Feed loads ALL videos at once (limit 1000), then pages client-side in batches of 18
-- `/api/media/[...path]` has path traversal protection + extension whitelist (.mp4, .webm, .mkv, .jpg, .jpeg, .png, .json)
 - YouTube API responses need HTML entity decoding (handled in `lib/youtube.ts`)
-- `next.config.ts` whitelists YouTube image domains for next/image
+- `next.config.ts` whitelists YouTube image domains + `*.r2.dev` for next/image
+- `sync_downloads.py` uploads media/thumbnail/subtitle/info.json to R2 using boto3 S3-compatible API

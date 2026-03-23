@@ -1,14 +1,20 @@
 """
-Sync ytdl-sub downloads from MEDIA_DIRECTORY → Supabase videos table.
+Sync ytdl-sub downloads from MEDIA_DIRECTORY → Supabase videos table,
+then upload sidecar files to Cloudflare R2.
 
 Scans for .info.json sidecar files, extracts rich metadata from yt-dlp,
-and upserts into the videos table with is_downloaded=true.
+upserts into the videos table, and uploads media/thumbnail/subtitle/info.json
+to R2 for CDN serving.
 
 Usage:
-    python scripts/sync_downloads.py
+    uv run python scripts/sync_downloads.py
+    uv run python scripts/sync_downloads.py --limit 50
+    uv run python scripts/sync_downloads.py --skip-r2
+    uv run python scripts/sync_downloads.py --purge
 """
 
 import json
+import mimetypes
 import os
 import sys
 from datetime import datetime, timezone
@@ -17,7 +23,7 @@ from pathlib import Path
 try:
     from supabase import create_client
 except ImportError:
-    print("Missing dependency: pip install supabase")
+    print("Missing dependency: uv add supabase")
     sys.exit(1)
 
 # Load env from .env file in project root
@@ -294,10 +300,226 @@ def upsert_videos(client, rows: list[dict]):
         print(f"  Upserted {min(i + BATCH_SIZE, total)}/{total} videos")
 
 
+# ---------------------------------------------------------------------------
+# R2 Upload
+# ---------------------------------------------------------------------------
+
+def create_r2_client():
+    """Create a boto3 S3 client configured for Cloudflare R2."""
+    import boto3
+
+    account_id = os.environ.get("R2_ACCOUNT_ID")
+    access_key = os.environ.get("R2_ACCESS_KEY_ID")
+    secret_key = os.environ.get("R2_SECRET_ACCESS_KEY")
+
+    missing = []
+    if not account_id:
+        missing.append("R2_ACCOUNT_ID")
+    if not access_key:
+        missing.append("R2_ACCESS_KEY_ID")
+    if not secret_key:
+        missing.append("R2_SECRET_ACCESS_KEY")
+    if not os.environ.get("R2_BUCKET_NAME"):
+        missing.append("R2_BUCKET_NAME")
+
+    if missing:
+        print(f"Error: Missing R2 environment variable(s): {', '.join(missing)}")
+        sys.exit(2)
+
+    return boto3.client(
+        "s3",
+        endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name="auto",
+    )
+
+
+def upload_to_r2(r2_client, bucket: str, local_path: Path, r2_key: str) -> bool:
+    """Upload a single file to R2. Returns True on success, False on failure."""
+    from botocore.exceptions import ClientError
+
+    mime_type, _ = mimetypes.guess_type(str(local_path))
+    if not mime_type:
+        mime_type = "application/octet-stream"
+
+    try:
+        file_size = local_path.stat().st_size
+        r2_client.upload_file(
+            str(local_path),
+            bucket,
+            r2_key,
+            ExtraArgs={"ContentType": mime_type},
+        )
+        size_mb = file_size / (1024 * 1024)
+        print(f"    Uploaded {r2_key} ({size_mb:.1f} MB, {mime_type})")
+        return True
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "Unknown")
+        error_msg = e.response.get("Error", {}).get("Message", str(e))
+        print(f"    FAILED {r2_key}: [{error_code}] {error_msg}")
+        return False
+    except OSError as e:
+        print(f"    FAILED {r2_key}: file read error: {e}")
+        return False
+
+
+def sync_to_r2(client, r2_client, media_dir: Path, limit: int | None, purge: bool) -> dict:
+    """Upload pending videos to R2 and optionally purge local files.
+
+    Returns a dict with counts: uploaded, skipped, failed, purged.
+    """
+    bucket = os.environ.get("R2_BUCKET_NAME", "")
+
+    # Query videos that need R2 upload
+    query = (
+        client.table("videos")
+        .select("youtube_id, media_path, thumbnail_path, subtitle_path")
+        .eq("is_downloaded", True)
+        .is_("r2_synced_at", "null")
+        .not_.is_("media_path", "null")
+        .order("published_at", desc=True)
+    )
+    if limit:
+        query = query.limit(limit)
+
+    resp = query.execute()
+    pending = resp.data or []
+
+    counts = {"uploaded": 0, "skipped": 0, "failed": 0, "purged": 0}
+
+    if not pending:
+        print("  No pending videos for R2 upload.")
+        return counts
+
+    print(f"\n  {len(pending)} video(s) pending R2 upload" + (f" (limit: {limit})" if limit else ""))
+
+    for i, video in enumerate(pending, 1):
+        yt_id = video["youtube_id"]
+        media_path = video.get("media_path")
+        thumb_path = video.get("thumbnail_path")
+        sub_path = video.get("subtitle_path")
+
+        if not media_path:
+            counts["skipped"] += 1
+            continue
+
+        print(f"\n  [{i}/{len(pending)}] {yt_id}")
+
+        local_media = media_dir / media_path
+        if not local_media.exists():
+            print(f"    SKIP: local file not found: {media_path}")
+            counts["skipped"] += 1
+            continue
+
+        # Upload all sidecar files
+        all_ok = True
+
+        # 1. Media file (required)
+        if not upload_to_r2(r2_client, bucket, local_media, media_path):
+            all_ok = False
+
+        # 2. Thumbnail (optional)
+        if thumb_path:
+            local_thumb = media_dir / thumb_path
+            if local_thumb.exists():
+                if not upload_to_r2(r2_client, bucket, local_thumb, thumb_path):
+                    all_ok = False
+
+        # 3. Subtitle (optional)
+        if sub_path:
+            local_sub = media_dir / sub_path
+            if local_sub.exists():
+                if not upload_to_r2(r2_client, bucket, local_sub, sub_path):
+                    all_ok = False
+
+        # 4. info.json (derived from media_path stem)
+        info_key = str(Path(media_path).with_suffix(".info.json"))
+        info_key = info_key.replace("\\", "/")
+        local_info = media_dir / info_key
+        if local_info.exists():
+            if not upload_to_r2(r2_client, bucket, local_info, info_key):
+                all_ok = False
+
+        if all_ok:
+            # Set r2_synced_at in DB
+            now_iso = datetime.now(timezone.utc).isoformat()
+            client.table("videos").update(
+                {"r2_synced_at": now_iso}
+            ).eq("youtube_id", yt_id).execute()
+            counts["uploaded"] += 1
+            print(f"    r2_synced_at set")
+
+            # Purge local files if requested
+            if purge:
+                _purge_local_files(client, yt_id, media_dir, media_path, thumb_path, sub_path, info_key, counts)
+        else:
+            print(f"    PARTIAL FAILURE: r2_synced_at NOT set (will retry next run)")
+            counts["failed"] += 1
+
+    return counts
+
+
+def _purge_local_files(
+    client, yt_id: str, media_dir: Path,
+    media_path: str, thumb_path: str | None, sub_path: str | None, info_key: str,
+    counts: dict,
+):
+    """Delete local files for a video after confirming r2_synced_at is set in DB."""
+    # Safety check: re-verify r2_synced_at from DB before deleting
+    verify = (
+        client.table("videos")
+        .select("r2_synced_at")
+        .eq("youtube_id", yt_id)
+        .single()
+        .execute()
+    )
+    if not verify.data or not verify.data.get("r2_synced_at"):
+        print(f"    PURGE SKIPPED: r2_synced_at not confirmed in DB for {yt_id}")
+        return
+
+    files_to_delete = [media_path]
+    if thumb_path:
+        files_to_delete.append(thumb_path)
+    if sub_path:
+        files_to_delete.append(sub_path)
+    files_to_delete.append(info_key)
+
+    deleted = 0
+    for rel_path in files_to_delete:
+        local_file = media_dir / rel_path
+        if local_file.exists():
+            try:
+                local_file.unlink()
+                print(f"    Purged: {rel_path}")
+                deleted += 1
+            except OSError as e:
+                print(f"    Purge failed: {rel_path}: {e}")
+
+    if deleted > 0:
+        counts["purged"] += 1
+
+
 def main():
     load_env()
 
+    # Fix Windows console encoding for Unicode channel names
+    if sys.stdout.encoding != "utf-8":
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+    # Parse CLI flags
     full_resync = "--full" in sys.argv
+    skip_r2 = "--skip-r2" in sys.argv
+    purge = "--purge" in sys.argv
+
+    limit: int | None = None
+    if "--limit" in sys.argv:
+        try:
+            idx = sys.argv.index("--limit")
+            limit = int(sys.argv[idx + 1])
+        except (IndexError, ValueError):
+            print("Error: --limit requires an integer argument")
+            sys.exit(1)
 
     supabase_url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
     supabase_key = os.environ.get("SUPABASE_SECRET_KEY")
@@ -305,15 +527,16 @@ def main():
 
     if not supabase_url or not supabase_key:
         print("Error: NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SECRET_KEY must be set")
-        sys.exit(1)
+        sys.exit(2)
 
     media_dir = Path(media_directory)
     if not media_dir.exists():
         print(f"Error: MEDIA_DIRECTORY does not exist: {media_dir}")
-        sys.exit(1)
+        sys.exit(2)
 
     client = create_client(supabase_url, supabase_key)
 
+    # --- Phase 1: DB Sync ---
     skip_ids: set[str] | None = None
     if not full_resync:
         print("Fetching already-synced video IDs (use --full to force full rescan)...")
@@ -325,17 +548,43 @@ def main():
     print(f"\nScanning media directory: {media_dir}")
     rows = scan_media_directory(media_dir, skip_ids=skip_ids)
 
-    if not rows:
-        print("  No new downloaded videos found. Nothing to sync.")
-        return
+    db_synced = 0
+    if rows:
+        print(f"\nEnsuring channels exist...")
+        ensure_channels_exist(client, rows)
 
-    print(f"\nEnsuring channels exist...")
-    ensure_channels_exist(client, rows)
+        print(f"\nUpserting {len(rows)} new video(s) to Supabase...")
+        upsert_videos(client, rows)
+        db_synced = len(rows)
 
-    print(f"\nUpserting {len(rows)} new video(s) to Supabase...")
-    upsert_videos(client, rows)
+    # --- Phase 2: R2 Upload ---
+    r2_counts = {"uploaded": 0, "skipped": 0, "failed": 0, "purged": 0}
 
-    print(f"\nDone! Synced {len(rows)} new video(s).")
+    if not skip_r2:
+        try:
+            r2_client = create_r2_client()
+        except Exception as e:
+            print(f"\nFatal: Cannot initialize R2 client: {e}")
+            sys.exit(2)
+
+        print(f"\nSyncing to R2...")
+        r2_counts = sync_to_r2(client, r2_client, media_dir, limit, purge)
+    else:
+        print("\n--skip-r2: Skipping R2 upload step")
+
+    # --- Summary ---
+    print(f"\n{'=' * 50}")
+    print(f"  DB synced:    {db_synced} new video(s)")
+    print(f"  R2 uploaded:  {r2_counts['uploaded']}")
+    print(f"  R2 skipped:   {r2_counts['skipped']} (already synced or missing local file)")
+    print(f"  R2 failed:    {r2_counts['failed']}")
+    if purge:
+        print(f"  Purged:       {r2_counts['purged']} local file set(s)")
+    print(f"{'=' * 50}")
+
+    # Exit code
+    if r2_counts["failed"] > 0:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

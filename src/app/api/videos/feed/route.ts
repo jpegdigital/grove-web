@@ -151,13 +151,13 @@ export async function GET(request: NextRequest) {
       } satisfies FeedResponse);
     }
 
-    // Step 2: Get all downloaded videos for these channels
+    // Step 2: Get all R2-synced videos for these channels
     const { data: videoRows, error: videoErr } = await supabase
       .from("videos")
       .select(
-        "youtube_id, title, thumbnail_url, channel_id, published_at, duration, duration_seconds, is_downloaded, media_path, thumbnail_path"
+        "youtube_id, title, thumbnail_url, channel_id, published_at, duration, duration_seconds, is_downloaded, media_path, thumbnail_path, r2_synced_at"
       )
-      .eq("is_downloaded", true)
+      .not("r2_synced_at", "is", null)
       .in("channel_id", channelIds)
       .order("published_at", { ascending: false });
 

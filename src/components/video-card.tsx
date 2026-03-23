@@ -30,9 +30,9 @@ export function VideoCard({
   creatorAvatar,
   durationSeconds,
 }: VideoCardProps) {
-  // Prefer local thumbnail if available, fall back to YouTube CDN
+  // Prefer R2-hosted thumbnail if available, fall back to YouTube CDN
   const thumb = thumbnailPath
-    ? `/api/media/${thumbnailPath}`
+    ? `${process.env.NEXT_PUBLIC_R2_PUBLIC_URL}/${thumbnailPath}`
     : thumbnailUrl;
 
   return (

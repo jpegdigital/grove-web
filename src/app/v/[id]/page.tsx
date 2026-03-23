@@ -153,7 +153,7 @@ function LocalPlayer({
   const onEndedRef = useRef(onEnded);
   onEndedRef.current = onEnded;
 
-  const src = `/api/media/${mediaPath}`;
+  const src = `${process.env.NEXT_PUBLIC_R2_PUBLIC_URL}/${mediaPath}`;
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
@@ -573,7 +573,7 @@ export default function VideoPage() {
                         <Image
                           src={
                             s.thumbnailPath
-                              ? `/api/media/${s.thumbnailPath}`
+                              ? `${process.env.NEXT_PUBLIC_R2_PUBLIC_URL}/${s.thumbnailPath}`
                               : s.thumbnailUrl
                           }
                           alt={s.title}
@@ -783,7 +783,7 @@ export default function VideoPage() {
             <div className="flex flex-col gap-2">
               {feedVideos?.map((v) => {
                 const thumb = v.thumbnailPath
-                  ? `/api/media/${v.thumbnailPath}`
+                  ? `${process.env.NEXT_PUBLIC_R2_PUBLIC_URL}/${v.thumbnailPath}`
                   : v.thumbnailUrl;
                 const isActive = v.id === id;
                 return (

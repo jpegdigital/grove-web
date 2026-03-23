@@ -24,6 +24,8 @@ presets:
       before: "now"
 
     ytdl_options:
+      cookiefile: "ytdl-sub/cookies.txt"
+      playlistend: 250
       postprocessor_args:
         FFmpegVideoConvertor+ffmpeg_o:
           - "-movflags"

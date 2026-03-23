@@ -40,6 +40,7 @@ yarn-error.log*
 # ytdl-sub working directory and generated files
 .ytdl-sub-working-directory/
 ytdl-sub/subscriptions.yaml
+ytdl-sub/cookies.txt
 
 # local config
 .claude/settings.local.json
