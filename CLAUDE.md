@@ -18,6 +18,10 @@ Kid-friendly curated YouTube feed. Next.js 16 + Supabase + ytdl-sub.
 | `uv run python scripts/sync_downloads.py --skip-r2` | DB sync only (skip R2 upload) |
 | `uv run python scripts/sync_downloads.py --purge` | Delete local files after R2 upload (opt-in) |
 | `uv run python scripts/sync_subscriptions.py` | Sync YouTube channel metadata |
+| `uv run python scripts/sync_producer.py` | Discover new videos + identify removals via YouTube API |
+| `uv run python scripts/sync_producer.py --channel UC...` | Run for a single channel only |
+| `uv run python scripts/sync_producer.py --dry-run` | Preview queue operations without writing |
+| `uv run python scripts/sync_producer.py --verbose` | Show per-video decisions |
 
 ## Architecture
 

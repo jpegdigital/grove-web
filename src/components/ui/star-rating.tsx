@@ -72,17 +72,6 @@ export function StarRating({
           );
         })}
       </span>
-      <input
-        type="number"
-        min={0}
-        max={100}
-        value={value}
-        onChange={(e) => {
-          const v = Math.min(100, Math.max(0, Number(e.target.value) || 0));
-          onChange(v);
-        }}
-        className="w-10 h-5 text-xs text-center bg-transparent border border-border rounded tabular-nums"
-      />
     </span>
   );
 }

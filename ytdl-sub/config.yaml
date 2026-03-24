@@ -9,7 +9,7 @@ presets:
       - "Max 1080p"
       - "Filter Duration"
 
-    download: "{subscription_value}"
+    download: "{url}"
 
     # Output: {subscription_name}/{YYYY-MM}/{video_id}.ext
     output_options:
@@ -20,7 +20,7 @@ presets:
       maintain_download_archive: True
 
     date_range:
-      after: "today-6months"
+      after: "{date_range_after}"
       before: "now"
 
     ytdl_options:
@@ -50,16 +50,18 @@ presets:
       description: "{webpage_url}"
 
     overrides:
+      url: "{subscription_value}"
       media_directory: "E:/Entertainment/PradoTube"
       filter_duration_min_s: 300
+      date_range_after: "today-6months"
 
     throttle_protection:
       sleep_per_download_s:
-        min: 2.0
-        max: 8.0
+        min: 1.0
+        max: 3.0
       sleep_per_subscription_s:
-        min: 5.0
-        max: 12.0
+        min: 2.0
+        max: 5.0
       max_downloads_per_subscription:
-        min: 10
-        max: 30
+        min: 50
+        max: 80

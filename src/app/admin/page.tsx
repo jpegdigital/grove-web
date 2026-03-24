@@ -37,6 +37,9 @@ import {
   PanelRightOpen,
   LayoutGrid,
   LayoutList,
+  HardDrive,
+  CloudUpload,
+  Star,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -61,6 +64,7 @@ interface CuratedChannelRow {
   display_order: number;
   priority: number;
   creator_id: string | null;
+  date_range_override: string | null;
   channels: {
     youtube_id: string;
     title: string;
@@ -203,6 +207,26 @@ async function fetchCreatorsData(): Promise<CreatorsResponse> {
   return res.json();
 }
 
+interface VideoCounts {
+  channel_id: string;
+  downloaded: number;
+  uploaded: number;
+}
+
+async function fetchVideoCounts(): Promise<Map<string, VideoCounts>> {
+  const { data, error } = await supabase.rpc("video_counts_by_channel");
+  if (error) throw new Error("Failed to load video counts");
+  const map = new Map<string, VideoCounts>();
+  for (const row of data || []) {
+    map.set(row.channel_id, {
+      channel_id: row.channel_id,
+      downloaded: Number(row.downloaded),
+      uploaded: Number(row.uploaded),
+    });
+  }
+  return map;
+}
+
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export default function AdminPage() {
@@ -236,7 +260,16 @@ export default function AdminPage() {
     queryFn: fetchCreatorsData,
   });
 
+  const { data: videoCounts = new Map<string, VideoCounts>() } = useQuery({
+    queryKey: ["video-counts"],
+    queryFn: fetchVideoCounts,
+  });
+
   const isHydrated = !isHydrating && !isCreatorsLoading;
+
+  // Aggregate video counts for header
+  const totalDownloaded = [...videoCounts.values()].reduce((s, c) => s + c.downloaded, 0);
+  const totalUploaded = [...videoCounts.values()].reduce((s, c) => s + c.uploaded, 0);
 
   const creators = [...(creatorsData?.creators || [])].sort((a, b) => a.name.localeCompare(b.name));
   const ungroupedChannels = creatorsData?.ungrouped || [];
@@ -519,6 +552,27 @@ export default function AdminPage() {
     [queryClient]
   );
 
+  const updateDateRange = useCallback(
+    async (curatedId: string, dateRangeOverride: string | null) => {
+      try {
+        const res = await fetch(`/api/curated-channels/${curatedId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ date_range_override: dateRangeOverride }),
+        });
+        if (!res.ok) {
+          toast.error("Failed to update date range");
+          return;
+        }
+        queryClient.invalidateQueries({ queryKey: ["creators"] });
+        toast.success(dateRangeOverride ? `Date range: ${dateRangeOverride}` : "Date range: default (6mo)");
+      } catch {
+        toast.error("Failed to update date range");
+      }
+    },
+    [queryClient]
+  );
+
   const updateCreatorPriority = useCallback(
     async (creatorId: string, priority: number) => {
       try {
@@ -659,6 +713,14 @@ export default function AdminPage() {
               <span className="flex items-center gap-1.5">
                 <FolderPlus className="h-3.5 w-3.5" />
                 {creators.length} groups
+              </span>
+              <span className="flex items-center gap-1.5">
+                <HardDrive className="h-3.5 w-3.5" />
+                {totalDownloaded} dl
+              </span>
+              <span className="flex items-center gap-1.5">
+                <CloudUpload className="h-3.5 w-3.5" />
+                {totalUploaded} r2
               </span>
             </div>
             <button
@@ -807,6 +869,8 @@ export default function AdminPage() {
                   const avatar = getCreatorAvatar(creator);
                   const cover = getCreatorCover(creator);
                   const channelCount = creator.curated_channels.length;
+                  const groupDl = creator.curated_channels.reduce((s, cc) => s + (videoCounts.get(cc.channel_id)?.downloaded ?? 0), 0);
+                  const groupR2 = creator.curated_channels.reduce((s, cc) => s + (videoCounts.get(cc.channel_id)?.uploaded ?? 0), 0);
 
                   return (
                     <div
@@ -883,6 +947,10 @@ export default function AdminPage() {
                                 size={12}
                               />
                               <span>{channelCount} ch</span>
+                              <span>·</span>
+                              <span>{groupDl} dl</span>
+                              <span>·</span>
+                              <span>{groupR2} r2</span>
                             </div>
                           </div>
 
@@ -981,6 +1049,10 @@ export default function AdminPage() {
                                     onAssign={assignChannelToCreator}
                                     showUngroup
                                     onPriorityChange={updateChannelPriority}
+                                    downloadedCount={videoCounts.get(cc.channel_id)?.downloaded}
+                                    uploadedCount={videoCounts.get(cc.channel_id)?.uploaded}
+                                    dateRangeOverride={cc.date_range_override}
+                                    onDateRangeChange={updateDateRange}
                                   />
                                 );
                               })}
@@ -1027,6 +1099,10 @@ export default function AdminPage() {
                             onAssign={assignChannelToCreator}
                             showUngroup={false}
                             onPriorityChange={updateChannelPriority}
+                            downloadedCount={videoCounts.get(cc.channel_id)?.downloaded}
+                            uploadedCount={videoCounts.get(cc.channel_id)?.uploaded}
+                            dateRangeOverride={cc.date_range_override}
+                            onDateRangeChange={updateDateRange}
                           />
                         );
                       })}
@@ -1337,6 +1413,14 @@ function MoveToGroupDropdown({
 }
 
 /** Compact channel row for inside group sections */
+const DATE_RANGE_OPTIONS = [
+  { value: "", label: "6mo" },
+  { value: "today-1years", label: "1y" },
+  { value: "today-2years", label: "2y" },
+  { value: "today-5years", label: "5y" },
+  { value: "19700101", label: "All" },
+];
+
 function ChannelRow({
   channel,
   curatedId,
@@ -1345,6 +1429,10 @@ function ChannelRow({
   onAssign,
   showUngroup,
   onPriorityChange,
+  downloadedCount = 0,
+  uploadedCount = 0,
+  dateRangeOverride,
+  onDateRangeChange,
 }: {
   channel: Channel & { curatedId: string; creatorId: string | null; priority: number };
   curatedId: string;
@@ -1357,72 +1445,126 @@ function ChannelRow({
   ) => void;
   showUngroup: boolean;
   onPriorityChange: (curatedId: string, priority: number) => void;
+  downloadedCount?: number;
+  uploadedCount?: number;
+  dateRangeOverride?: string | null;
+  onDateRangeChange?: (curatedId: string, value: string | null) => void;
 }) {
+  const [editingPriority, setEditingPriority] = useState(false);
+  const priorityStars = (channel.priority / 20).toFixed(1).replace(/\.0$/, "");
+
   return (
     <div className="channel-row group/ch">
       <div className="flex gap-2.5 px-4 py-2">
-        {/* Thumbnail spanning both rows */}
-        <div className="relative h-8 w-8 flex-shrink-0 overflow-hidden rounded-md ring-1 ring-border">
+        {/* Thumbnail */}
+        <div className="relative h-9 w-9 flex-shrink-0 self-center overflow-hidden rounded-lg ring-1 ring-border">
           <Image
             src={channel.thumbnailUrl}
             alt={channel.title}
             fill
             className="object-cover"
-            sizes="32px"
+            sizes="36px"
           />
         </div>
 
-        {/* Right side: name on top, stats+actions below */}
+        {/* Two-line content */}
         <div className="min-w-0 flex-1">
-          <p className="font-body truncate text-sm leading-none font-medium text-foreground">
-            {channel.title}
-          </p>
-          <div className="mt-0.5 flex items-center gap-2 leading-none">
-          <div className="font-body flex items-center gap-2 text-xs text-muted-foreground">
-            <StarRating
-              value={channel.priority}
-              onChange={(v) => onPriorityChange(curatedId, v)}
-              size={12}
-            />
+          {/* Line 1: Name + hover actions */}
+          <div className="flex items-center gap-1">
+            <p className="font-body truncate text-sm font-medium leading-snug text-foreground">
+              {channel.title}
+            </p>
+            {/* Hover actions — hidden until row hover */}
+            <div className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/ch:opacity-100">
+              <MoveToGroupDropdown
+                curatedId={curatedId}
+                currentCreatorId={channel.creatorId}
+                channelTitle={channel.title}
+                creators={creators}
+                onAssign={onAssign}
+                showUngroup={showUngroup}
+              />
+              <a
+                href={`https://www.youtube.com/${channel.customUrl}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                title="Open on YouTube"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+              <button
+                onClick={() => onRemove(channel.id)}
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                title="Remove channel"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Line 2: Handle + stats + date range */}
+          <div className="font-body mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground leading-none">
+            {channel.customUrl && (
+              <>
+                <span className="truncate max-w-[100px]">{channel.customUrl}</span>
+                <span>·</span>
+              </>
+            )}
+            {/* Priority — click to edit */}
+            {editingPriority ? (
+              <span className="inline-flex items-center gap-1">
+                <StarRating
+                  value={channel.priority}
+                  onChange={(v) => {
+                    onPriorityChange(curatedId, v);
+                    setEditingPriority(false);
+                  }}
+                  size={11}
+                />
+                <button
+                  onClick={() => setEditingPriority(false)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ) : (
+              <button
+                onClick={() => setEditingPriority(true)}
+                className="inline-flex items-center gap-0.5 text-amber-400 hover:text-amber-300 transition-colors"
+                title="Edit priority"
+              >
+                <Star className="h-3 w-3 fill-current" />
+                <span>{priorityStars}</span>
+              </button>
+            )}
+            <span>·</span>
             <span>{formatCount(channel.subscriberCount)} subs</span>
             <span>·</span>
             <span>{formatCount(channel.videoCount)} vids</span>
+            <span>·</span>
+            <span>{downloadedCount} dl</span>
+            <span>·</span>
+            <span>{uploadedCount} r2</span>
+            {onDateRangeChange && (
+              <>
+                <span>·</span>
+                <select
+                  value={dateRangeOverride ?? ""}
+                  onChange={(e) => onDateRangeChange(curatedId, e.target.value || null)}
+                  className="h-4 rounded border border-border bg-transparent px-0.5 text-[11px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  title="Download date range"
+                >
+                  {DATE_RANGE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </>
+            )}
           </div>
-          <div className="ml-auto flex shrink-0 items-center gap-0.5">
-          {/* Move to group dropdown */}
-          <MoveToGroupDropdown
-            curatedId={curatedId}
-            currentCreatorId={channel.creatorId}
-            channelTitle={channel.title}
-            creators={creators}
-            onAssign={onAssign}
-            showUngroup={showUngroup}
-          />
-
-          {/* YouTube link */}
-          <a
-            href={`https://www.youtube.com/${channel.customUrl}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            title="Open on YouTube"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-          </a>
-
-          {/* Remove */}
-          <button
-            onClick={() => onRemove(channel.id)}
-            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-            title="Remove channel"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-          </div>
-        </div>
         </div>
       </div>
-
     </div>
   );
 }

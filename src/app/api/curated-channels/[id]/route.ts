@@ -23,6 +23,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       }
       updates.priority = p;
     }
+    if ("date_range_override" in body) {
+      updates.date_range_override = body.date_range_override || null;
+    }
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json(

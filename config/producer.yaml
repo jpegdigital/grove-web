@@ -1,0 +1,44 @@
+# Video Sync Producer configuration
+# All tunables in one place — no magic numbers in code.
+
+producer:
+  # Maximum videos to consider per channel (newest first).
+  # YouTube returns 50 per page, so 250 = 5 API calls max.
+  max_videos_per_channel: 250
+
+  # Minimum duration in seconds. Videos shorter than this are skipped.
+  # Set to 60 to only exclude Shorts; 300 = 5 min+ content only.
+  min_duration_seconds: 300
+
+  # Default date range when a channel has no override.
+  # Supports: "today-6months", "today-2years", "today-1years", "YYYYMMDD"
+  default_date_range: "today-6months"
+
+  # Stop paginating after this many consecutive videos past the date cutoff.
+  # Handles rare out-of-order uploads playlists (re-published unlisted videos).
+  early_stop_tolerance: 3
+
+api:
+  # YouTube Data API page size (max 50, don't change unless Google changes limits)
+  page_size: 50
+
+  # videos.list enrichment batch size (max 50)
+  enrichment_batch_size: 50
+
+  # Concurrent channel fetches (I/O-bound, 5-10 is safe)
+  max_workers: 8
+
+  # Retry on 429/5xx errors
+  max_retries: 3
+  retry_backoff_base: 2  # exponential: 2s, 4s, 8s
+
+quota:
+  daily_limit: 10000
+  warn_threshold: 8000  # log warning when cumulative quota exceeds this
+
+db:
+  # Supabase query pagination batch size
+  page_size: 1000
+
+  # Enqueue batch size for sync_queue inserts
+  enqueue_batch_size: 100

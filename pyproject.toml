@@ -7,10 +7,13 @@ dependencies = [
     "pyyaml",
     "requests",
     "boto3>=1.42.74",
+    "python-dateutil>=2.9.0.post0",
 ]
 
 [tool.uv]
-dev-dependencies = []
+dev-dependencies = [
+    "pytest>=9.0.2",
+]
 
 [project.scripts]
 sync-subscriptions = "scripts.sync_subscriptions:main"
