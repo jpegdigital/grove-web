@@ -16,7 +16,7 @@ export async function GET() {
       .select(
         `id, name, slug, avatar_channel_id, cover_channel_id, display_order, priority, created_at,
          curated_channels(
-           id, channel_id, display_order, priority, creator_id, date_range_override,
+           id, channel_id, display_order, priority, creator_id, date_range_override, min_duration_override,
            channels(youtube_id, title, description, custom_url, thumbnail_url, banner_url, subscriber_count, video_count, view_count)
          )`
       )
@@ -34,7 +34,7 @@ export async function GET() {
     const { data: ungrouped, error: ungroupedError } = await supabase
       .from("curated_channels")
       .select(
-        `id, channel_id, display_order, priority, creator_id, date_range_override,
+        `id, channel_id, display_order, priority, creator_id, date_range_override, min_duration_override,
          channels(youtube_id, title, description, custom_url, thumbnail_url, banner_url, subscriber_count, video_count, view_count)`
       )
       .is("creator_id", null)

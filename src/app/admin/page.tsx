@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { useMountEffect } from "@/hooks/use-mount-effect";
 import { createPortal } from "react-dom";
 import Image from "next/image";
@@ -65,6 +65,7 @@ interface CuratedChannelRow {
   priority: number;
   creator_id: string | null;
   date_range_override: string | null;
+  min_duration_override: number | null;
   channels: {
     youtube_id: string;
     title: string;
@@ -573,6 +574,27 @@ export default function AdminPage() {
     [queryClient]
   );
 
+  const updateMinDuration = useCallback(
+    async (curatedId: string, minDuration: number | null) => {
+      try {
+        const res = await fetch(`/api/curated-channels/${curatedId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ min_duration_override: minDuration }),
+        });
+        if (!res.ok) {
+          toast.error("Failed to update min duration");
+          return;
+        }
+        queryClient.invalidateQueries({ queryKey: ["creators"] });
+        toast.success(minDuration ? `Min duration: ${minDuration}s` : "Min duration: default (300s)");
+      } catch {
+        toast.error("Failed to update min duration");
+      }
+    },
+    [queryClient]
+  );
+
   const updateCreatorPriority = useCallback(
     async (creatorId: string, priority: number) => {
       try {
@@ -1053,6 +1075,8 @@ export default function AdminPage() {
                                     uploadedCount={videoCounts.get(cc.channel_id)?.uploaded}
                                     dateRangeOverride={cc.date_range_override}
                                     onDateRangeChange={updateDateRange}
+                                    minDurationOverride={cc.min_duration_override}
+                                    onMinDurationChange={updateMinDuration}
                                   />
                                 );
                               })}
@@ -1103,6 +1127,8 @@ export default function AdminPage() {
                             uploadedCount={videoCounts.get(cc.channel_id)?.uploaded}
                             dateRangeOverride={cc.date_range_override}
                             onDateRangeChange={updateDateRange}
+                            minDurationOverride={cc.min_duration_override}
+                            onMinDurationChange={updateMinDuration}
                           />
                         );
                       })}
@@ -1412,6 +1438,57 @@ function MoveToGroupDropdown({
   );
 }
 
+/** Local-state input that saves on blur or Enter — no flicker while typing */
+function MinDurationInput({
+  curatedId,
+  value,
+  onChange,
+}: {
+  curatedId: string;
+  value: number | null | undefined;
+  onChange: (curatedId: string, value: number | null) => void;
+}) {
+  const [local, setLocal] = useState(value != null ? String(value) : "");
+  const committed = value != null ? String(value) : "";
+
+  // Sync from server when prop changes (e.g. after refetch)
+  useEffect(() => {
+    setLocal(value != null ? String(value) : "");
+  }, [value]);
+
+  const save = () => {
+    const trimmed = local.trim();
+    const next = trimmed === "" ? null : parseInt(trimmed, 10);
+    const prev = value ?? null;
+    if (next !== prev) {
+      onChange(curatedId, Number.isNaN(next) ? null : next);
+    }
+  };
+
+  return (
+    <>
+      <span>·</span>
+      <input
+        type="number"
+        min={0}
+        step={60}
+        placeholder="300"
+        value={local}
+        onChange={(e) => setLocal(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.currentTarget.blur();
+          }
+        }}
+        className="h-4 w-12 rounded border border-border bg-transparent px-0.5 text-center text-[11px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        title="Min duration (seconds) — empty = default (300s)"
+      />
+      <span className="text-[10px] text-muted-foreground/60">s</span>
+    </>
+  );
+}
+
 /** Compact channel row for inside group sections */
 const DATE_RANGE_OPTIONS = [
   { value: "", label: "6mo" },
@@ -1433,6 +1510,8 @@ function ChannelRow({
   uploadedCount = 0,
   dateRangeOverride,
   onDateRangeChange,
+  minDurationOverride,
+  onMinDurationChange,
 }: {
   channel: Channel & { curatedId: string; creatorId: string | null; priority: number };
   curatedId: string;
@@ -1449,6 +1528,8 @@ function ChannelRow({
   uploadedCount?: number;
   dateRangeOverride?: string | null;
   onDateRangeChange?: (curatedId: string, value: string | null) => void;
+  minDurationOverride?: number | null;
+  onMinDurationChange?: (curatedId: string, value: number | null) => void;
 }) {
   const [editingPriority, setEditingPriority] = useState(false);
   const priorityStars = (channel.priority / 20).toFixed(1).replace(/\.0$/, "");
@@ -1561,6 +1642,13 @@ function ChannelRow({
                   ))}
                 </select>
               </>
+            )}
+            {onMinDurationChange && (
+              <MinDurationInput
+                curatedId={curatedId}
+                value={minDurationOverride}
+                onChange={onMinDurationChange}
+              />
             )}
           </div>
         </div>

@@ -26,6 +26,21 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if ("date_range_override" in body) {
       updates.date_range_override = body.date_range_override || null;
     }
+    if ("min_duration_override" in body) {
+      const raw = body.min_duration_override;
+      if (raw === null || raw === "" || raw === undefined) {
+        updates.min_duration_override = null;
+      } else {
+        const d = Number(raw);
+        if (!Number.isInteger(d) || d < 0) {
+          return NextResponse.json(
+            { error: "min_duration_override must be a non-negative integer (seconds)" },
+            { status: 400 }
+          );
+        }
+        updates.min_duration_override = d;
+      }
+    }
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json(
