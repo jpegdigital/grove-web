@@ -1,10 +1,10 @@
 ﻿# PradoTube
 
-Kid-friendly curated YouTube feed. Next.js 16 + Supabase + ytdl-sub.
+Kid-friendly curated YouTube feed. Next.js 16 + Supabase + yt-dlp.
 
 ## CRITICAL
 
-- **ALWAYS use `uv run` for Python scripts. NEVER use naked `python` or `pip`.** This project uses uv for Python dependency management. Example: `uv run python scripts/sync_downloads.py`, NOT `python scripts/sync_downloads.py`.
+- **ALWAYS use `uv run` for Python scripts. NEVER use naked `python` or `pip`.** Example: `uv run python scripts/sync_producer.py`, NOT `python scripts/sync_producer.py`.
 
 ## Commands
 
@@ -13,17 +13,52 @@ Kid-friendly curated YouTube feed. Next.js 16 + Supabase + ytdl-sub.
 | `npm run dev` | Start dev server |
 | `npm run build` | Production build |
 | `npm run lint` | ESLint |
-| `uv run python scripts/sync_downloads.py` | Scan ytdl-sub downloads into Supabase + upload to R2 |
-| `uv run python scripts/sync_downloads.py --limit 50` | Upload up to 50 videos to R2 per run |
-| `uv run python scripts/sync_downloads.py --skip-r2` | DB sync only (skip R2 upload) |
-| `uv run python scripts/sync_downloads.py --purge` | Delete local files after R2 upload (opt-in) |
-| `uv run python scripts/sync_subscriptions.py` | Sync YouTube channel metadata |
-| `uv run python scripts/sync_producer.py` | Daily run: recent videos only (playlist), scored, ~326 quota |
-| `uv run python scripts/sync_producer.py --mode full` | Weekly run: popular + rated + recent, scored, ~5,500 quota |
-| `uv run python scripts/sync_producer.py --channel UC...` | Run for a single channel only |
-| `uv run python scripts/sync_producer.py --dry-run` | Preview queue operations without writing |
-| `uv run python scripts/sync_producer.py --verbose` | Show per-video scoring and source breakdowns |
-| `uv run python scripts/sync_producer.py --mode full --dry-run` | Preview full discovery without writing |
+
+## Sync Pipeline
+
+The video pipeline has three scripts that run in order: **producer** → **consumer** → (legacy) **downloads**.
+
+### Producer — discovers videos, enqueues jobs
+
+Queries the YouTube API, scores videos, diffs desired vs existing catalog, writes download/remove jobs to `sync_queue`.
+
+```bash
+uv run python scripts/sync_producer.py                  # daily: recent playlist only (~326 quota)
+uv run python scripts/sync_producer.py --mode full       # weekly: popular + rated + recent (~5,500 quota)
+uv run python scripts/sync_producer.py --channel UC...   # single channel
+uv run python scripts/sync_producer.py --dry-run         # preview, no writes
+uv run python scripts/sync_producer.py --verbose         # per-video scoring detail
+```
+
+### Consumer — processes jobs from the queue
+
+Picks pending jobs from `sync_queue`, downloads via yt-dlp, uploads to R2, upserts video records. Also handles removals (delete R2 files, clear video record).
+
+```bash
+uv run python scripts/sync_consumer.py                   # process up to 50 jobs
+uv run python scripts/sync_consumer.py --limit 100        # override batch size
+uv run python scripts/sync_consumer.py --dry-run          # preview, no side effects
+uv run python scripts/sync_consumer.py --verbose           # yt-dlp progress, R2 keys
+uv run python scripts/sync_consumer.py --downloads-only    # skip removal jobs
+uv run python scripts/sync_consumer.py --removals-only     # skip download jobs
+```
+
+### Downloads (legacy) — scans local ytdl-sub media directory
+
+Scans existing ytdl-sub downloads on disk, upserts to Supabase, uploads to R2. Being replaced by producer+consumer pipeline.
+
+```bash
+uv run python scripts/sync_downloads.py                   # incremental scan + R2 upload
+uv run python scripts/sync_downloads.py --limit 50        # cap R2 uploads per run
+uv run python scripts/sync_downloads.py --skip-r2         # DB sync only
+uv run python scripts/sync_downloads.py --purge           # delete local files after R2 upload
+```
+
+### Other
+
+```bash
+uv run python scripts/sync_subscriptions.py               # sync YouTube channel metadata
+```
 
 ## Architecture
 
@@ -79,4 +114,9 @@ specs/              # Feature specs and plans
 - Feed loads ALL videos at once (limit 1000), then pages client-side in batches of 18
 - YouTube API responses need HTML entity decoding (handled in `lib/youtube.ts`)
 - `next.config.ts` whitelists YouTube image domains + `*.r2.dev` for next/image
-- `sync_downloads.py` uploads media/thumbnail/subtitle/info.json to R2 using boto3 S3-compatible API
+- Videos only appear in the feed when `r2_synced_at IS NOT NULL` — the consumer sets this after R2 upload
+- Producer never downloads files or touches R2; consumer never calls YouTube API — they communicate via `sync_queue`
+- Consumer calls yt-dlp via subprocess (never `import yt_dlp`) — CLI is the stable interface
+- R2 keys follow `@handle/YYYY-MM/video_id.ext` pattern — flat per-month directories
+- Config lives in `config/producer.yaml` and `config/consumer.yaml` — no magic numbers in scripts
+- See `docs/architecture/` for detailed pipeline docs

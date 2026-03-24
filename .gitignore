@@ -37,10 +37,14 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# consumer staging directory
+downloads/staging/
+
 # ytdl-sub working directory and generated files
 .ytdl-sub-working-directory/
 ytdl-sub/subscriptions.yaml
 ytdl-sub/cookies.txt
+config/cookies.txt
 
 # local config
 .claude/settings.local.json

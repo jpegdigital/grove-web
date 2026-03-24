@@ -8,6 +8,8 @@ dependencies = [
     "requests",
     "boto3>=1.42.74",
     "python-dateutil>=2.9.0.post0",
+    "yt-dlp>=2025.3.31",
+    "curl-cffi>=0.14.0",
 ]
 
 [tool.uv]
