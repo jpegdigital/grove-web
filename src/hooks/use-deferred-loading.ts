@@ -38,6 +38,10 @@ export function useDeferredLoading(
         setShowSkeleton(false);
         shownAtRef.current = null;
       }
+    } else {
+      // Not loading, no pending timer — ensure skeleton is off
+      // (handles router cache restoring stale showSkeleton=true)
+      setShowSkeleton(false);
     }
 
     return () => {

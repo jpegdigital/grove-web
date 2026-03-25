@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { LogOut, Settings, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { User } from "@supabase/supabase-js";
@@ -40,22 +41,22 @@ export function UserNav() {
   return (
     <div className="flex items-center gap-1.5">
       {isAdmin && (
-        <a
+        <Link
           href="/admin/subscriptions"
           className="rounded-xl p-2 text-muted-foreground transition-all hover:bg-primary/10 hover:text-primary"
           title="Manage subscriptions"
         >
           <Users className="h-4 w-4" />
-        </a>
+        </Link>
       )}
       {isAdmin && (
-        <a
+        <Link
           href="/admin"
           className="rounded-xl p-2 text-muted-foreground transition-all hover:bg-primary/10 hover:text-primary"
           title="Admin panel"
         >
           <Settings className="h-4 w-4" />
-        </a>
+        </Link>
       )}
       <span className="font-body text-xs text-muted-foreground px-1 hidden sm:inline">
         {displayName}
