@@ -16,7 +16,7 @@ Kid-friendly curated YouTube feed. Next.js 16 + Supabase + yt-dlp.
 
 ## Sync Pipeline
 
-The video pipeline has three scripts that run in order: **producer** → **consumer** → (legacy) **downloads**.
+The video pipeline has two scripts that run in order: **producer** → **consumer**.
 
 ### Producer — discovers videos, enqueues jobs
 
@@ -50,17 +50,6 @@ uv run python scripts/sync_consumer.py --removals-only     # skip download jobs
 ```bash
 uv run python scripts/configure_r2_cors.py               # apply CORS rules to R2 bucket
 uv run python scripts/configure_r2_cors.py --dry-run      # preview CORS configuration
-```
-
-### Downloads (legacy) — scans local ytdl-sub media directory
-
-Scans existing ytdl-sub downloads on disk, upserts to Supabase, uploads to R2. Being replaced by producer+consumer pipeline.
-
-```bash
-uv run python scripts/sync_downloads.py                   # incremental scan + R2 upload
-uv run python scripts/sync_downloads.py --limit 50        # cap R2 uploads per run
-uv run python scripts/sync_downloads.py --skip-r2         # DB sync only
-uv run python scripts/sync_downloads.py --purge           # delete local files after R2 upload
 ```
 
 ### Other
