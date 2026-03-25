@@ -95,6 +95,15 @@ def load_config() -> dict:
             "sleep_interval_subtitles": 5,
             "min_height": 361,
         },
+        "hls": {
+            "tiers": [
+                {"label": "480p", "height": 480, "bandwidth": 1200000},
+                {"label": "720p", "height": 720, "bandwidth": 2500000},
+            ],
+            "segment_duration": 6,
+            "segment_type": "fmp4",
+            "min_tiers": 1,
+        },
         "r2": {
             "key_template": "{handle}/{year}-{month}/{video_id}.{ext}",
         },
