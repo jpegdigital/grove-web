@@ -2,87 +2,28 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useState, useEffect, useCallback } from "react";
 import { useTheme } from "next-themes";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Loader2,
   Tv,
   Sun,
   Moon,
   Settings,
-  Sparkles,
   Play,
 } from "lucide-react";
+import {
+  fetchCreatorsLightweight,
+  type CreatorLightweight,
+} from "@/lib/queries/creators";
+import { useDeferredLoading } from "@/hooks/use-deferred-loading";
 
 /* ─── Types ─── */
 
-interface ChannelData {
-  youtube_id: string;
-  title: string;
-  description: string;
-  custom_url: string;
-  thumbnail_url: string;
-  banner_url: string | null;
-  subscriber_count: number;
-  video_count: number;
-  view_count: number;
-}
-
-interface CuratedChannel {
-  id: string;
-  channel_id: string;
-  display_order: number;
-  creator_id: string | null;
-  channels: ChannelData;
-}
-
-interface Creator {
-  id: string;
-  name: string;
-  slug: string;
-  avatar_channel_id: string | null;
-  cover_channel_id: string | null;
-  display_order: number;
-  curated_channels: CuratedChannel[];
-}
-
-interface CreatorsResponse {
-  creators: Creator[];
-  ungrouped: CuratedChannel[];
-}
+type Creator = CreatorLightweight;
 
 /* ─── Helpers ─── */
 
-/** Get the avatar URL for a creator (from their designated avatar channel) */
-function getCreatorAvatar(creator: Creator): string | null {
-  if (creator.avatar_channel_id) {
-    const ch = creator.curated_channels.find(
-      (cc) => cc.channel_id === creator.avatar_channel_id
-    );
-    if (ch?.channels?.thumbnail_url) return ch.channels.thumbnail_url;
-  }
-  // Fallback: first channel's thumbnail
-  if (creator.curated_channels.length > 0) {
-    return creator.curated_channels[0]?.channels?.thumbnail_url ?? null;
-  }
-  return null;
-}
-
-/** Get cover image for a creator */
-function getCreatorCover(creator: Creator): string | null {
-  if (creator.cover_channel_id) {
-    const ch = creator.curated_channels.find(
-      (cc) => cc.channel_id === creator.cover_channel_id
-    );
-    if (ch?.channels?.banner_url) return ch.channels.banner_url;
-  }
-  if (creator.curated_channels.length > 0) {
-    return creator.curated_channels[0]?.channels?.banner_url ?? null;
-  }
-  return null;
-}
-
-/** Rainbow logo */
 function RainbowLogo({ className = "" }: { className?: string }) {
   const letters = [
     { char: "P", color: "var(--logo-green)" },
@@ -107,75 +48,107 @@ function RainbowLogo({ className = "" }: { className?: string }) {
   );
 }
 
-/** Accent colors for creator cards */
-const ACCENT_COLORS = [
-  { gradient: "from-[#58CC02] to-[#89E219]", ring: "ring-[#58CC02]/30" },
-  { gradient: "from-[#1CB0F6] to-[#00CD9C]", ring: "ring-[#1CB0F6]/30" },
-  { gradient: "from-[#CE82FF] to-[#FF4B4B]", ring: "ring-[#CE82FF]/30" },
-  { gradient: "from-[#FF9600] to-[#FFC800]", ring: "ring-[#FF9600]/30" },
-  { gradient: "from-[#FF4B4B] to-[#FF9600]", ring: "ring-[#FF4B4B]/30" },
-  { gradient: "from-[#FFC800] to-[#58CC02]", ring: "ring-[#FFC800]/30" },
-  { gradient: "from-[#00CD9C] to-[#1CB0F6]", ring: "ring-[#00CD9C]/30" },
+/** Accent gradient pairs — vivid rings for each creator */
+const ACCENT_RINGS = [
+  { from: "#58CC02", to: "#89E219" },
+  { from: "#1CB0F6", to: "#00CD9C" },
+  { from: "#CE82FF", to: "#FF4B4B" },
+  { from: "#FF9600", to: "#FFC800" },
+  { from: "#FF4B4B", to: "#FF9600" },
+  { from: "#FFC800", to: "#58CC02" },
+  { from: "#00CD9C", to: "#1CB0F6" },
 ];
 
-/* ─── Fetch ─── */
+/** Pseudo-random skeleton text widths so they don't all look identical */
+const SKELETON_TEXT_WIDTHS = [72, 56, 80, 64, 88, 60, 76, 68, 84, 52, 72, 64];
 
-async function fetchCreators(): Promise<CreatorsResponse> {
-  const res = await fetch("/api/creators");
-  if (!res.ok) throw new Error("Failed to load creators");
-  return res.json();
-}
+const SKELETON_COUNT = 24;
 
-/* ─── Creator Card ─── */
+/* ─── Creator Avatar — layered skeleton + content ─── */
 
-function CreatorCard({
+function CreatorAvatar({
   creator,
   index,
-  priority,
+  revealed,
 }: {
-  creator: Creator;
+  creator: Creator | null;
   index: number;
-  priority?: boolean;
+  revealed: boolean;
 }) {
-  const accent = ACCENT_COLORS[index % ACCENT_COLORS.length];
-  const avatar = getCreatorAvatar(creator);
-  const cover = getCreatorCover(creator);
-  const channelCount = creator.curated_channels.length;
+  const accent = ACCENT_RINGS[index % ACCENT_RINGS.length];
+  const [imgLoaded, setImgLoaded] = useState(false);
+  const hasImage = creator?.avatar_url != null;
+  const showContent = revealed && creator !== null && (imgLoaded || !hasImage);
+
+  const onImageLoad = useCallback(() => setImgLoaded(true), []);
+
+  // Stagger: each avatar reveals 40ms after the previous
+  const revealDelay = `${index * 40}ms`;
 
   return (
-    <div className="creator-card group relative flex flex-col items-center text-center overflow-hidden rounded-3xl border border-border/40 bg-card transition-all duration-300 hover:border-border hover:shadow-2xl hover:shadow-primary/8 hover:-translate-y-1.5">
-      {/* Cover / gradient band */}
-      <div className="relative w-full h-24 sm:h-28 shrink-0">
-        <div className={`absolute inset-0 overflow-hidden bg-gradient-to-br ${accent.gradient}`}>
-          {cover ? (
-            <Image
-              src={cover}
-              alt=""
-              fill
-              className="object-cover object-center scale-125 transition-transform duration-500 group-hover:scale-[1.35]"
-              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-              priority={priority}
-            />
-          ) : null}
-        </div>
-        <div className="absolute top-0 left-0 right-0 -bottom-2 bg-gradient-to-t from-card via-card/60 to-transparent" />
-      </div>
+    <div
+      className="home-creator-item group relative flex flex-col items-center gap-3"
+      data-skeleton={!showContent || undefined}
+      style={
+        {
+          "--accent-from": accent.from,
+          "--accent-to": accent.to,
+        } as React.CSSProperties
+      }
+    >
+      {/* Clickable link overlay — only active when content is shown */}
+      {showContent && creator && (
+        <Link
+          href={`/c/${creator.slug}`}
+          className="absolute inset-0 z-10 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          aria-label={creator.name}
+        />
+      )}
 
-      {/* Big avatar — overlaps the cover */}
-      <div className="-mt-14 relative z-10 shrink-0">
-        <div className={`relative h-24 w-24 sm:h-28 sm:w-28 overflow-hidden rounded-full border-4 border-card shadow-xl bg-card ring-4 ${accent.ring} transition-all duration-300 group-hover:scale-105 group-hover:ring-8`}>
-          {avatar ? (
-            <Image
-              src={avatar}
-              alt={creator.name}
-              fill
-              className="object-cover"
-              sizes="112px"
-              priority={priority}
-            />
-          ) : (
-            <div className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${accent.gradient}`}>
-              <span className="font-heading text-3xl text-white">
+      {/* Avatar ring */}
+      <div className="home-avatar-ring relative">
+        <div className="home-avatar-inner">
+          {/* Skeleton layer — always present, fades out */}
+          <div
+            className="absolute inset-0 rounded-full skeleton-shimmer"
+            style={{
+              opacity: showContent ? 0 : 1,
+              transition: `opacity 300ms ease ${showContent ? revealDelay : "0ms"}`,
+            }}
+          />
+
+          {/* Content layer — preload image while skeleton shows, fade in when ready */}
+          {hasImage && (
+            <div
+              className="absolute inset-0"
+              style={{
+                opacity: showContent ? 1 : 0,
+                transition: `opacity 300ms ease ${revealDelay}`,
+              }}
+            >
+              <Image
+                src={creator!.avatar_url!}
+                alt={creator!.name}
+                fill
+                className="object-cover rounded-full"
+                sizes="(max-width: 640px) 96px, (max-width: 1024px) 120px, 140px"
+                priority={index < 8}
+                onLoad={onImageLoad}
+              />
+            </div>
+          )}
+
+          {/* Fallback initial — for creators without avatar_url */}
+          {creator && !hasImage && (
+            <div
+              className="absolute inset-0 flex items-center justify-center rounded-full"
+              style={{
+                backgroundImage: `linear-gradient(135deg, ${accent.from}, ${accent.to})`,
+                opacity: showContent ? 1 : 0,
+                transition: `opacity 300ms ease ${revealDelay}`,
+              }}
+            >
+              <span className="font-heading text-3xl sm:text-4xl text-white drop-shadow-sm">
                 {creator.name.charAt(0)}
               </span>
             </div>
@@ -183,104 +156,31 @@ function CreatorCard({
         </div>
       </div>
 
-      {/* Creator name — big and bold */}
-      <div className="px-5 pt-3 pb-5 flex flex-col items-center gap-2 flex-1">
-        <h3 className="font-heading text-xl sm:text-2xl text-foreground leading-tight group-hover:text-primary transition-colors">
-          {creator.name}
-        </h3>
+      {/* Name — skeleton bar fades out, real name fades in */}
+      <div className="relative w-[100px] sm:w-[120px] h-10 flex items-start justify-center">
+        {/* Skeleton text bar */}
+        <div
+          className="absolute top-1 left-1/2 -translate-x-1/2 h-4 rounded-md skeleton-shimmer"
+          style={{
+            width: SKELETON_TEXT_WIDTHS[index % SKELETON_TEXT_WIDTHS.length],
+            opacity: showContent ? 0 : 1,
+            transition: `opacity 300ms ease ${showContent ? revealDelay : "0ms"}`,
+          }}
+        />
 
-        {/* Channel count pill */}
-        {channelCount > 0 && (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1 text-xs font-bold text-muted-foreground">
-            <Tv className="h-3 w-3" />
-            {channelCount} channel{channelCount !== 1 ? "s" : ""}
+        {/* Real name */}
+        {creator && (
+          <span
+            className="font-heading text-sm sm:text-base text-foreground/80 text-center leading-tight group-hover:text-foreground line-clamp-2"
+            style={{
+              opacity: showContent ? 1 : 0,
+              transition: `opacity 300ms ease ${revealDelay}`,
+            }}
+          >
+            {creator.name}
           </span>
         )}
-
-        {/* Channel avatars row — small circular thumbnails */}
-        {channelCount >= 1 && (
-          <div className="flex items-center -space-x-2 mt-1">
-            {creator.curated_channels.slice(0, 5).map((cc) => (
-              <div
-                key={cc.id}
-                className="relative h-8 w-8 overflow-hidden rounded-full border-2 border-card shadow-sm"
-                title={cc.channels?.title}
-              >
-                {cc.channels?.thumbnail_url ? (
-                  <Image
-                    src={cc.channels.thumbnail_url}
-                    alt={cc.channels.title}
-                    fill
-                    className="object-cover"
-                    sizes="32px"
-                  />
-                ) : (
-                  <div className={`h-full w-full bg-gradient-to-br ${accent.gradient}`} />
-                )}
-              </div>
-            ))}
-            {channelCount > 5 && (
-              <div className="relative h-8 w-8 overflow-hidden rounded-full border-2 border-card bg-secondary flex items-center justify-center">
-                <span className="text-[10px] font-bold text-muted-foreground">
-                  +{channelCount - 5}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
       </div>
-
-      {/* Hover accent line at top */}
-      <div
-        className={`absolute top-0 inset-x-0 h-1 bg-gradient-to-r ${accent.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300`}
-      />
-    </div>
-  );
-}
-
-/* ─── Ungrouped Channel Card (fallback for channels not assigned to a creator) ─── */
-
-function UngroupedChannelCard({
-  channel,
-  index,
-}: {
-  channel: CuratedChannel;
-  index: number;
-}) {
-  const accent = ACCENT_COLORS[(index + 3) % ACCENT_COLORS.length];
-  const ch = channel.channels;
-  if (!ch) return null;
-
-  return (
-    <div className="creator-card group relative flex flex-col items-center text-center overflow-hidden rounded-3xl border border-border/40 bg-card transition-all duration-300 hover:border-border hover:shadow-2xl hover:shadow-primary/8 hover:-translate-y-1.5">
-      <div className="relative w-full h-24 sm:h-28 shrink-0">
-        <div className={`absolute inset-0 overflow-hidden bg-gradient-to-br ${accent.gradient}`}>
-          {ch.banner_url ? (
-            <Image src={ch.banner_url} alt="" fill className="object-cover object-center scale-125 transition-transform duration-500 group-hover:scale-[1.35]" sizes="(max-width: 640px) 100vw, 50vw" />
-          ) : null}
-        </div>
-        <div className="absolute top-0 left-0 right-0 -bottom-2 bg-gradient-to-t from-card via-card/60 to-transparent" />
-      </div>
-
-      <div className="-mt-14 relative z-10 shrink-0">
-        <div className={`relative h-24 w-24 sm:h-28 sm:w-28 overflow-hidden rounded-full border-4 border-card shadow-xl bg-card ring-4 ${accent.ring} transition-all duration-300 group-hover:scale-105 group-hover:ring-8`}>
-          {ch.thumbnail_url ? (
-            <Image src={ch.thumbnail_url} alt={ch.title} fill className="object-cover" sizes="112px" />
-          ) : (
-            <div className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${accent.gradient}`}>
-              <span className="font-heading text-3xl text-white">{ch.title.charAt(0)}</span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="px-5 pt-3 pb-5 flex flex-col items-center gap-2 flex-1">
-        <h3 className="font-heading text-xl sm:text-2xl text-foreground leading-tight group-hover:text-primary transition-colors">
-          {ch.title}
-        </h3>
-      </div>
-
-      <div className={`absolute top-0 inset-x-0 h-1 bg-gradient-to-r ${accent.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
     </div>
   );
 }
@@ -288,39 +188,25 @@ function UngroupedChannelCard({
 /* ─── Page ─── */
 
 export default function Home() {
-  const { theme, setTheme } = useTheme();
+  const { resolvedTheme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const { data, isLoading } = useQuery({
     queryKey: ["creators"],
-    queryFn: fetchCreators,
+    queryFn: fetchCreatorsLightweight,
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
-  const creators = [...(data?.creators ?? [])].sort((a, b) =>
+  const showSkeleton = useDeferredLoading(isLoading);
+  const dataReady = !showSkeleton && !isLoading;
+
+  const creators = [...(data ?? [])].sort((a, b) =>
     a.name.localeCompare(b.name)
   );
-  const ungrouped = data?.ungrouped ?? [];
-  const totalCreators = creators.length + ungrouped.length;
 
-  // Loading state
-  if (isLoading) {
-    return (
-      <div className="player-root flex min-h-screen items-center justify-center">
-        <div className="grain-overlay" />
-        <div className="relative z-10 flex flex-col items-center gap-4">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-[#89E219] shadow-lg">
-            <Tv className="h-6 w-6 text-white" />
-          </div>
-          <Loader2 className="h-5 w-5 animate-spin text-primary" />
-          <p className="font-body text-sm text-muted-foreground">
-            Loading creators...
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // Empty state
-  if (totalCreators === 0) {
+  // Empty state (only after loading completes)
+  if (dataReady && creators.length === 0) {
     return (
       <div className="player-root flex min-h-screen items-center justify-center">
         <div className="grain-overlay" />
@@ -347,9 +233,21 @@ export default function Home() {
     );
   }
 
+  // Build slots: either skeleton placeholders or real creators
+  const slots: (Creator | null)[] = dataReady
+    ? creators
+    : creators.length > 0
+      ? creators // data arrived but min display hasn't elapsed — show data anyway
+      : Array.from({ length: SKELETON_COUNT }, () => null);
+
   return (
-    <div className="player-root min-h-screen">
+    <div className="home-root min-h-screen">
       <div className="grain-overlay" />
+
+      {/* Background glow orbs */}
+      <div className="home-glow home-glow-1" />
+      <div className="home-glow home-glow-2" />
+      <div className="home-glow home-glow-3" />
 
       {/* Header */}
       <header className="player-header sticky top-0 z-50 border-b border-border/50 px-5 py-3">
@@ -369,10 +267,10 @@ export default function Home() {
               Watch
             </Link>
             <button
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
               className="rounded-xl p-2 text-muted-foreground transition-all hover:bg-primary/10 hover:text-primary"
             >
-              {theme === "dark" ? (
+              {mounted && resolvedTheme === "dark" ? (
                 <Sun className="h-4 w-4" />
               ) : (
                 <Moon className="h-4 w-4" />
@@ -389,47 +287,33 @@ export default function Home() {
       </header>
 
       {/* Hero */}
-      <section className="relative z-10 px-6 pt-12 pb-6 sm:pt-16 sm:pb-8 text-center">
-        <div className="max-w-2xl mx-auto">
-          <h2 className="font-heading text-3xl sm:text-4xl lg:text-5xl tracking-tight text-foreground">
-            Who do you want to{" "}
-            <span className="text-primary">watch</span>?
-          </h2>
-          <p className="font-body text-muted-foreground mt-3 text-base sm:text-lg leading-relaxed max-w-lg mx-auto">
-            Pick a creator to start watching!
-          </p>
-        </div>
+      <section className="home-hero relative z-10 px-6 pt-10 pb-4 sm:pt-14 sm:pb-6 text-center">
+        <h2 className="font-heading text-3xl sm:text-4xl lg:text-5xl tracking-tight text-foreground">
+          Who do you want to{" "}
+          <span className="home-hero-accent">watch</span>?
+        </h2>
       </section>
 
-      {/* Creator Grid */}
-      <main className="relative z-10 px-5 pb-16 sm:px-6">
-        <div className="max-w-5xl mx-auto grid gap-6 sm:gap-8 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
-          {creators.map((creator, i) => (
-            <Link
-              key={creator.id}
-              href={`/c/${creator.slug}`}
-            >
-              <CreatorCard
-                creator={creator}
-                index={i}
-                priority={i < 4}
-              />
-            </Link>
-          ))}
-          {ungrouped.map((cc, i) => (
-            <Link key={cc.id} href="/feed">
-              <UngroupedChannelCard
-                channel={cc}
-                index={i}
-              />
-            </Link>
+      {/* Creator Grid — single grid, each slot crossfades skeleton → content */}
+      <main
+        className="home-grid relative z-10 px-6 sm:px-10 lg:px-16 pb-20"
+        aria-busy={!dataReady}
+      >
+        <div className="flex flex-wrap justify-center gap-x-6 gap-y-8 sm:gap-x-10 sm:gap-y-10 lg:gap-x-12 lg:gap-y-12">
+          {slots.map((creator, i) => (
+            <CreatorAvatar
+              key={creator?.id ?? `skeleton-${i}`}
+              creator={creator}
+              index={i}
+              revealed={dataReady}
+            />
           ))}
         </div>
       </main>
 
       {/* Footer */}
-      <footer className="relative z-10 text-center py-10 border-t border-border/40">
-        <p className="font-body text-xs text-muted-foreground">
+      <footer className="relative z-10 text-center py-10 border-t border-border/30">
+        <p className="font-body text-xs text-muted-foreground/60">
           Curated with care for little viewers
         </p>
       </footer>

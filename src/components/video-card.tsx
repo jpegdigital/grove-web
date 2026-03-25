@@ -9,6 +9,7 @@ interface VideoCardProps {
   creatorName: string;
   creatorAvatar: string;
   durationSeconds: number;
+  onThumbnailLoad?: () => void;
 }
 
 function formatDuration(seconds: number): string {
@@ -29,6 +30,7 @@ export function VideoCard({
   creatorName,
   creatorAvatar,
   durationSeconds,
+  onThumbnailLoad,
 }: VideoCardProps) {
   // Prefer R2-hosted thumbnail if available, fall back to YouTube CDN
   const thumb = thumbnailPath
@@ -49,6 +51,7 @@ export function VideoCard({
             fill
             className="object-cover transition-transform duration-500 group-hover:scale-105"
             sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+            onLoad={onThumbnailLoad}
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-secondary to-muted">

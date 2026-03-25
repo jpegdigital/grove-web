@@ -203,9 +203,8 @@ async function fetchCuratedChannels(): Promise<Channel[]> {
 }
 
 async function fetchCreatorsData(): Promise<CreatorsResponse> {
-  const res = await fetch("/api/creators");
-  if (!res.ok) throw new Error("Failed to load creators");
-  return res.json();
+  const { fetchCreatorsWithChannels } = await import("@/lib/queries/creators");
+  return fetchCreatorsWithChannels();
 }
 
 interface VideoCounts {

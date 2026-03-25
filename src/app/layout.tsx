@@ -33,7 +33,7 @@ export default function RootLayout({
       className={`${fredoka.variable} ${nunito.variable} h-full antialiased`}
       suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-full flex flex-col bg-background">
         <QueryProvider>
           <ThemeProvider
             attribute="class"

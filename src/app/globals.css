@@ -66,6 +66,12 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Body background — set early so there's no white flash before Tailwind resolves */
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
 /* ========================
    Light Theme (default)
    ========================
@@ -776,3 +782,205 @@
   will-change: transform;
   cursor: pointer;
 }
+
+/* ========================
+   Home Page — Character Select
+   ======================== */
+
+.home-root {
+  background: var(--background);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Ambient glow orbs — create depth and atmosphere */
+.home-glow {
+  position: fixed;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+  filter: blur(80px);
+  opacity: 0.12;
+}
+
+.dark .home-glow {
+  opacity: 0.08;
+}
+
+.home-glow-1 {
+  width: 500px;
+  height: 500px;
+  top: -10%;
+  right: -5%;
+  background: var(--primary);
+  animation: home-drift 20s ease-in-out infinite;
+}
+
+.home-glow-2 {
+  width: 400px;
+  height: 400px;
+  bottom: -5%;
+  left: -8%;
+  background: var(--lavender);
+  animation: home-drift 25s ease-in-out infinite reverse;
+}
+
+.home-glow-3 {
+  width: 350px;
+  height: 350px;
+  top: 40%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--sky);
+  animation: home-drift 18s ease-in-out infinite 5s;
+}
+
+@keyframes home-drift {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(20px, -15px); }
+  50% { transform: translate(-10px, 20px); }
+  75% { transform: translate(15px, 10px); }
+}
+
+/* Hero accent word */
+.home-hero-accent {
+  color: var(--primary);
+  position: relative;
+  display: inline-block;
+}
+
+.home-hero-accent::after {
+  content: "";
+  position: absolute;
+  bottom: 2px;
+  left: -2px;
+  right: -2px;
+  height: 6px;
+  background: var(--primary);
+  opacity: 0.2;
+  border-radius: 3px;
+}
+
+/* ─── Creator avatar item ─── */
+.home-creator-item {
+  cursor: pointer;
+}
+
+/* ─── Avatar ring — the gradient border effect ─── */
+.home-avatar-ring {
+  --ring-size: 100px;
+  width: var(--ring-size);
+  height: var(--ring-size);
+  border-radius: 50%;
+  padding: 3px;
+  background: linear-gradient(
+    135deg,
+    var(--accent-from),
+    var(--accent-to),
+    var(--accent-from)
+  );
+  background-size: 200% 200%;
+  transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+              box-shadow 0.35s ease;
+  position: relative;
+}
+
+@media (min-width: 640px) {
+  .home-avatar-ring {
+    --ring-size: 120px;
+    padding: 3.5px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .home-avatar-ring {
+    --ring-size: 140px;
+    padding: 4px;
+  }
+}
+
+/* Hover: scale up + glow */
+.home-creator-item:hover .home-avatar-ring,
+.home-creator-item:focus-visible .home-avatar-ring {
+  transform: scale(1.12);
+  box-shadow:
+    0 0 24px color-mix(in srgb, var(--accent-from) 40%, transparent),
+    0 0 48px color-mix(in srgb, var(--accent-to) 20%, transparent);
+  animation: home-ring-shimmer 2s linear infinite;
+}
+
+@keyframes home-ring-shimmer {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+/* Inner circle — clips the avatar image */
+.home-avatar-inner {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  overflow: hidden;
+  position: relative;
+  background: var(--background);
+}
+
+/* Subtle idle pulse — keeps avatars feeling alive */
+.home-creator-item:nth-child(odd) .home-avatar-ring {
+  animation: home-idle-breathe 4s ease-in-out infinite;
+}
+
+.home-creator-item:nth-child(even) .home-avatar-ring {
+  animation: home-idle-breathe 4s ease-in-out infinite 2s;
+}
+
+/* Override idle animation on hover */
+.home-creator-item:hover .home-avatar-ring {
+  animation: home-ring-shimmer 2s linear infinite !important;
+}
+
+@keyframes home-idle-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+}
+
+/* ─── Skeleton shimmer ─── */
+
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton-shimmer {
+  background-color: var(--muted);
+  background-image: linear-gradient(
+    90deg,
+    transparent 25%,
+    rgba(255, 255, 255, 0.15) 50%,
+    transparent 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+.dark .skeleton-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    transparent 25%,
+    rgba(255, 255, 255, 0.06) 50%,
+    transparent 75%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer {
+    animation: none;
+    background-image: none;
+  }
+}
+
+/* Skeletons: no pop-in stagger, appear immediately */
+.home-creator-item[data-skeleton] {
+  animation: none;
+  opacity: 1;
+}
+

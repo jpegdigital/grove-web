@@ -3,9 +3,10 @@
 import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import Hls from "hls.js";
 import { useMountEffect } from "@/hooks/use-mount-effect";
+import { useFeed } from "@/hooks/use-feed";
 import Link from "next/link";
 import Image from "next/image";
 import {
@@ -458,37 +459,21 @@ export default function VideoPage() {
     enabled: !!id,
   });
 
-  // Fetch same-creator suggestions when video ends
+  // Feed data for sidebar and suggestions (direct Supabase via useFeed)
   const creatorSlug = video?.creatorSlug ?? null;
-  const { data: suggestions } = useQuery<SuggestionVideo[]>({
-    queryKey: ["suggestions", creatorSlug, id],
-    queryFn: async () => {
-      if (!creatorSlug) return [];
-      const params = new URLSearchParams({
-        creator: creatorSlug,
-        limit: "7",
-      });
-      const res = await fetch(`/api/videos/feed?${params}`);
-      if (!res.ok) return [];
-      const data = await res.json();
-      // Filter out current video
-      return (data.videos ?? [])
-        .filter((v: SuggestionVideo) => v.id !== id)
-        .slice(0, 6);
-    },
-    enabled: !!creatorSlug && videoEnded,
-  });
+  const { videos: allFeedVideos } = useFeed(null);
 
-  // Sidebar feed videos
-  const { data: feedVideos } = useQuery<SuggestionVideo[]>({
-    queryKey: ["sidebar-feed"],
-    queryFn: async () => {
-      const res = await fetch("/api/videos/feed?limit=20");
-      if (!res.ok) return [];
-      const data = await res.json();
-      return data.videos ?? [];
-    },
-  });
+  const feedVideos: SuggestionVideo[] = useMemo(
+    () => allFeedVideos.slice(0, 20),
+    [allFeedVideos]
+  );
+
+  const suggestions: SuggestionVideo[] = useMemo(() => {
+    if (!creatorSlug || !videoEnded) return [];
+    return allFeedVideos
+      .filter((v) => v.creatorSlug === creatorSlug && v.id !== id)
+      .slice(0, 6);
+  }, [allFeedVideos, creatorSlug, videoEnded, id]);
 
   // Loading
   if (isLoading) {
@@ -660,30 +645,22 @@ export default function VideoPage() {
             {video.title}
           </h2>
 
-          <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            {/* Channel info */}
-            <div className="flex items-center gap-3">
+          {/* Creator info */}
+          {video.creatorName && (
+            <div className="mt-4 flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20">
                 <span className="font-heading text-sm text-primary font-semibold">
-                  {video.channel.charAt(0).toUpperCase()}
+                  {video.creatorName.charAt(0).toUpperCase()}
                 </span>
               </div>
-              <div className="min-w-0">
-                <p className="font-body text-sm font-medium text-foreground truncate">
-                  {video.channel}
-                </p>
-                <p className="font-body text-xs text-muted-foreground">
-                  {video.handle}
-                  {video.channelFollowers != null && (
-                    <span className="ml-1.5">
-                      &middot; {formatCount(video.channelFollowers)} subscribers
-                    </span>
-                  )}
-                </p>
-              </div>
+              <Link
+                href={video.creatorSlug ? `/c/${video.creatorSlug}` : "/feed"}
+                className="font-body text-sm font-medium text-foreground hover:text-primary transition-colors"
+              >
+                {video.creatorName}
+              </Link>
             </div>
-
-          </div>
+          )}
         </div>
 
         {/* Stats row */}

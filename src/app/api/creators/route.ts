@@ -9,54 +9,6 @@ function slugify(name: string): string {
     .replace(/^-|-$/g, "");
 }
 
-export async function GET() {
-  try {
-    const { data: creators, error } = await supabase
-      .from("creators")
-      .select(
-        `id, name, slug, avatar_channel_id, cover_channel_id, display_order, priority, created_at,
-         curated_channels(
-           id, channel_id, display_order, priority, creator_id, date_range_override, min_duration_override,
-           channels(youtube_id, title, description, custom_url, thumbnail_url, banner_url, subscriber_count, video_count, view_count)
-         )`
-      )
-      .order("display_order", { ascending: true });
-
-    if (error) {
-      console.error("Failed to load creators:", error);
-      return NextResponse.json(
-        { error: "Failed to load creators" },
-        { status: 500 }
-      );
-    }
-
-    // Also fetch ungrouped channels (creator_id is null)
-    const { data: ungrouped, error: ungroupedError } = await supabase
-      .from("curated_channels")
-      .select(
-        `id, channel_id, display_order, priority, creator_id, date_range_override, min_duration_override,
-         channels(youtube_id, title, description, custom_url, thumbnail_url, banner_url, subscriber_count, video_count, view_count)`
-      )
-      .is("creator_id", null)
-      .order("display_order", { ascending: true });
-
-    if (ungroupedError) {
-      console.error("Failed to load ungrouped channels:", ungroupedError);
-    }
-
-    return NextResponse.json({
-      creators: creators || [],
-      ungrouped: ungrouped || [],
-    });
-  } catch (e) {
-    console.error("Creators error:", e);
-    return NextResponse.json(
-      { error: "Failed to load creators" },
-      { status: 500 }
-    );
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
