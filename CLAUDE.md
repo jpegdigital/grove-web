@@ -32,15 +32,24 @@ uv run python scripts/sync_producer.py --verbose         # per-video scoring det
 
 ### Consumer — processes jobs from the queue
 
-Picks pending jobs from `sync_queue`, downloads via yt-dlp, uploads to R2, upserts video records. Also handles removals (delete R2 files, clear video record).
+Picks pending jobs from `sync_queue`, downloads 4 quality tiers (360p/480p/720p/1080p) via yt-dlp, remuxes each into HLS fMP4 segments via `ffmpeg -c copy`, generates master.m3u8, uploads the HLS package to R2, and upserts video records. Also handles removals (delete R2 files, clear video record). Legacy MP4-only videos still play — the player detects `.m3u8` vs `.mp4` automatically.
+
+**Requires**: ffmpeg on PATH (for HLS remux)
 
 ```bash
-uv run python scripts/sync_consumer.py                   # process up to 50 jobs
+uv run python scripts/sync_consumer.py                   # process up to 50 jobs (HLS pipeline)
 uv run python scripts/sync_consumer.py --limit 100        # override batch size
 uv run python scripts/sync_consumer.py --dry-run          # preview, no side effects
-uv run python scripts/sync_consumer.py --verbose           # yt-dlp progress, R2 keys
+uv run python scripts/sync_consumer.py --verbose           # per-tier download + remux progress
 uv run python scripts/sync_consumer.py --downloads-only    # skip removal jobs
 uv run python scripts/sync_consumer.py --removals-only     # skip download jobs
+```
+
+#### One-time R2 CORS setup (required for HLS playback)
+
+```bash
+uv run python scripts/configure_r2_cors.py               # apply CORS rules to R2 bucket
+uv run python scripts/configure_r2_cors.py --dry-run      # preview CORS configuration
 ```
 
 ### Downloads (legacy) — scans local ytdl-sub media directory
@@ -117,6 +126,8 @@ specs/              # Feature specs and plans
 - Videos only appear in the feed when `r2_synced_at IS NOT NULL` — the consumer sets this after R2 upload
 - Producer never downloads files or touches R2; consumer never calls YouTube API — they communicate via `sync_queue`
 - Consumer calls yt-dlp via subprocess (never `import yt_dlp`) — CLI is the stable interface
-- R2 keys follow `@handle/YYYY-MM/video_id.ext` pattern — flat per-month directories
+- HLS R2 keys follow `@handle/YYYY-MM/video_id/master.m3u8` with per-tier subdirectories (360p/, 480p/, 720p/, 1080p/)
+- Legacy MP4 R2 keys follow `@handle/YYYY-MM/video_id.ext` pattern — flat per-month directories
 - Config lives in `config/producer.yaml` and `config/consumer.yaml` — no magic numbers in scripts
+- HLS config (tiers, segment_duration, min_tiers) is in `config/consumer.yaml` under the `hls:` section
 - See `docs/architecture/` for detailed pipeline docs

@@ -50,6 +50,25 @@ ytdlp:
   # Minimum acceptable video height — below this, assume YouTube throttled us and fail the job
   min_height: 361
 
+hls:
+  # Quality tiers to download and package
+  tiers:
+    - label: "480p"
+      height: 480
+      bandwidth: 1200000    # bits/sec for master playlist
+    - label: "720p"
+      height: 720
+      bandwidth: 2500000
+
+  # HLS segment duration target (seconds)
+  segment_duration: 6
+
+  # Segment format: fmp4 (modern) or mpegts (legacy)
+  segment_type: fmp4
+
+  # Minimum tiers required to produce a valid HLS package
+  min_tiers: 1
+
 r2:
   # R2 key template: {handle}/{YYYY}-{MM}/{video_id}.{ext}
   # Interpolated at runtime from channel handle + published_at + video_id

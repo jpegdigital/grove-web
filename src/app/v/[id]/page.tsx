@@ -3,7 +3,8 @@
 import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
+import Hls from "hls.js";
 import { useMountEffect } from "@/hooks/use-mount-effect";
 import Link from "next/link";
 import Image from "next/image";
@@ -140,6 +141,7 @@ function LocalPlayer({
   onEnded?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -154,6 +156,57 @@ function LocalPlayer({
   onEndedRef.current = onEnded;
 
   const src = `${process.env.NEXT_PUBLIC_R2_PUBLIC_URL}/${mediaPath}`;
+  const isHls = mediaPath.endsWith(".m3u8");
+
+  // HLS initialization and cleanup
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !isHls) return;
+
+    // Check native HLS support first (Safari/iOS)
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = src;
+      return;
+    }
+
+    // Use hls.js for Chrome/Firefox
+    if (Hls.isSupported()) {
+      const hls = new Hls({
+        startLevel: -1, // Auto-select initial quality based on bandwidth
+        capLevelToPlayerSize: true,
+        enableWorker: true,
+      });
+
+      hls.loadSource(src);
+      hls.attachMedia(video);
+
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) {
+          switch (data.type) {
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              hls.recoverMediaError();
+              break;
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              hls.startLoad();
+              break;
+            default:
+              hls.destroy();
+              break;
+          }
+        }
+      });
+
+      hlsRef.current = hls;
+
+      return () => {
+        hls.destroy();
+        hlsRef.current = null;
+      };
+    }
+
+    // Fallback: try setting src directly (won't work on most non-Safari browsers for HLS)
+    video.src = src;
+  }, [src, isHls]);
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
@@ -263,12 +316,12 @@ function LocalPlayer({
     >
       <video
         ref={videoRef}
-        src={src}
+        {...(!isHls ? { src } : {})}
         poster={thumbnail}
         className="w-full max-h-[75vh] cursor-pointer"
         onClick={togglePlay}
         playsInline
-        preload="metadata"
+        preload="auto"
         title={title}
       />
 

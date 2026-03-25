@@ -1,6 +1,7 @@
 """Tests for sync_consumer.py — download pipeline, removal pipeline, utilities, and operational controls."""
 
 import json
+import subprocess
 import pytest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,16 +9,26 @@ from unittest.mock import MagicMock, patch, call
 
 from scripts.sync_consumer import (
     build_r2_key,
+    build_r2_key_hls,
+    build_format_selector,
+    build_ffmpeg_remux_cmd,
+    check_ffmpeg,
+    cleanup_legacy_mp4,
     cleanup_staging,
     clear_video_record,
     collect_downloaded_files,
     delete_from_r2,
     download_video,
+    download_video_tiers,
+    extract_tier_metadata,
     fail_job,
+    generate_master_playlist,
     parse_info_json,
     process_download_job,
     process_remove_job,
+    remux_to_hls,
     reset_stale_locks,
+    upload_hls_package,
     upload_to_r2,
     upsert_video_record,
 )
@@ -312,10 +323,11 @@ class TestProcessDownloadJob:
             mock_complete.assert_called_once_with(client, "job-uuid-1")
 
     @patch("scripts.sync_consumer.fail_job")
-    @patch("scripts.sync_consumer.download_video")
-    def test_failed_download_increments_attempts(self, mock_download, mock_fail, tmp_path):
+    @patch("scripts.sync_consumer.download_video_tiers")
+    def test_failed_download_increments_attempts(self, mock_tiers, mock_fail, tmp_path):
         with patch("scripts.sync_consumer.STAGING_DIR", tmp_path):
-            mock_download.return_value = (False, "ERROR: unavailable")
+            # No tiers downloaded — should fail with min_tiers enforcement
+            mock_tiers.return_value = ([], {})
 
             client = MagicMock()
             r2_client = MagicMock()
@@ -327,29 +339,38 @@ class TestProcessDownloadJob:
                            "merge_output_format": "mp4", "faststart": False,
                            "write_thumbnail": False, "write_subs": False,
                            "write_auto_subs": False, "sub_langs": "", "sub_format": "",
-                           "write_info_json": False}},
+                           "write_info_json": False},
+                 "hls": {"min_tiers": 1}},
                 verbose=False, dry_run=False,
             )
 
             assert result is False
             mock_fail.assert_called_once()
-            assert "yt-dlp exit non-zero" in mock_fail.call_args[0][2]
+            assert "tier" in mock_fail.call_args[0][2].lower()
 
     @patch("scripts.sync_consumer.fail_job")
-    @patch("scripts.sync_consumer.upload_video_files")
+    @patch("scripts.sync_consumer.upload_hls_package")
+    @patch("scripts.sync_consumer.remux_to_hls")
     @patch("scripts.sync_consumer.resolve_channel_handle")
-    @patch("scripts.sync_consumer.download_video")
-    def test_r2_failure_increments_attempts(self, mock_download, mock_resolve,
-                                             mock_upload, mock_fail, tmp_path):
+    @patch("scripts.sync_consumer.download_video_tiers")
+    def test_r2_failure_increments_attempts(self, mock_tiers, mock_resolve,
+                                             mock_remux, mock_upload, mock_fail, tmp_path):
         with patch("scripts.sync_consumer.STAGING_DIR", tmp_path):
-            mock_download.return_value = (True, "")
             mock_resolve.return_value = "@testchannel"
+            # 1 tier downloaded successfully
+            mock_tiers.return_value = (
+                [{"label": "720p", "height": 720, "bandwidth": 2500000,
+                  "mp4_path": tmp_path / "720p.mp4"}],
+                {},
+            )
+            # Remux succeeds
+            mock_remux.return_value = [
+                {"label": "720p", "height": 720, "bandwidth": 2500000,
+                 "mp4_path": tmp_path / "720p.mp4",
+                 "hls_dir": tmp_path / "hls" / "720p"},
+            ]
+            # Upload fails
             mock_upload.side_effect = RuntimeError("R2 upload failed")
-
-            # Create fake files
-            staging = tmp_path / "dQw4w9WgXcQ"
-            staging.mkdir()
-            (staging / "dQw4w9WgXcQ.mp4").write_bytes(b"fake")
 
             client = MagicMock()
             r2_client = MagicMock()
@@ -361,7 +382,8 @@ class TestProcessDownloadJob:
                            "merge_output_format": "mp4", "faststart": False,
                            "write_thumbnail": False, "write_subs": False,
                            "write_auto_subs": False, "sub_langs": "", "sub_format": "",
-                           "write_info_json": False}},
+                           "write_info_json": False},
+                 "hls": {"min_tiers": 1}},
                 verbose=False, dry_run=False,
             )
 
@@ -748,3 +770,315 @@ class TestUploadToR2:
         result = upload_to_r2(r2_client, "bucket", local_file, "key/test.mp4")
 
         assert result is False
+
+
+# ─── check_ffmpeg tests (T006) ───────────────────────────────────────────────
+
+
+class TestCheckFfmpeg:
+    """Tests for check_ffmpeg() — fail-fast if ffmpeg missing."""
+
+    @patch("scripts.sync_consumer.subprocess.run")
+    def test_ffmpeg_available(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="ffmpeg version 6.0")
+        # Should not raise
+        check_ffmpeg()
+        mock_run.assert_called_once()
+
+    @patch("scripts.sync_consumer.subprocess.run", side_effect=FileNotFoundError)
+    def test_ffmpeg_missing_exits(self, mock_run):
+        with pytest.raises(SystemExit) as exc_info:
+            check_ffmpeg()
+        assert exc_info.value.code == 2
+
+    @patch("scripts.sync_consumer.subprocess.run")
+    def test_ffmpeg_nonzero_exit_exits(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1)
+        with pytest.raises(SystemExit) as exc_info:
+            check_ffmpeg()
+        assert exc_info.value.code == 2
+
+    @patch("scripts.sync_consumer.subprocess.run", side_effect=subprocess.TimeoutExpired("ffmpeg", 10))
+    def test_ffmpeg_timeout_exits(self, mock_run):
+        import subprocess
+        with pytest.raises(SystemExit) as exc_info:
+            check_ffmpeg()
+        assert exc_info.value.code == 2
+
+
+# ─── HLS: build_format_selector tests (T007) ─────────────────────────────────
+
+
+class TestBuildFormatSelector:
+    """Tests for build_format_selector() — given tier config, assert correct format strings."""
+
+    def test_standard_tier(self):
+        tier = {"label": "720p", "height": 720, "bandwidth": 2500000}
+        fmt = build_format_selector(tier)
+        assert "height<=720" in fmt
+        assert "ext=mp4" in fmt
+        assert "ext=m4a" in fmt
+
+    def test_360p_tier(self):
+        tier = {"label": "360p", "height": 360, "bandwidth": 800000}
+        fmt = build_format_selector(tier)
+        assert "height<=360" in fmt
+
+    def test_1080p_tier(self):
+        tier = {"label": "1080p", "height": 1080, "bandwidth": 5000000}
+        fmt = build_format_selector(tier)
+        assert "height<=1080" in fmt
+
+    def test_all_tiers_produce_unique_selectors(self):
+        tiers = [
+            {"label": "360p", "height": 360, "bandwidth": 800000},
+            {"label": "480p", "height": 480, "bandwidth": 1200000},
+            {"label": "720p", "height": 720, "bandwidth": 2500000},
+            {"label": "1080p", "height": 1080, "bandwidth": 5000000},
+        ]
+        selectors = [build_format_selector(t) for t in tiers]
+        assert len(set(selectors)) == 4  # All unique
+
+
+# ─── HLS: build_ffmpeg_remux_cmd tests (T008) ────────────────────────────────
+
+
+class TestBuildFfmpegRemuxCmd:
+    """Tests for build_ffmpeg_remux_cmd() — assert correct ffmpeg args."""
+
+    def test_standard_args(self, tmp_path):
+        input_path = tmp_path / "720p.mp4"
+        output_dir = tmp_path / "720p"
+        cmd = build_ffmpeg_remux_cmd(input_path, output_dir, segment_duration=6)
+
+        assert "ffmpeg" in cmd[0] or cmd[0] == "ffmpeg"
+        assert "-c" in cmd
+        assert "copy" in cmd
+        assert "-f" in cmd
+        assert "hls" in cmd
+        assert "-hls_time" in cmd
+        assert "6" in cmd
+        assert "-hls_segment_type" in cmd
+        assert "fmp4" in cmd
+        assert "-hls_playlist_type" in cmd
+        assert "vod" in cmd
+        assert "-hls_flags" in cmd
+        assert "independent_segments" in cmd
+        assert "-hls_list_size" in cmd
+        assert "0" in cmd
+
+    def test_output_playlist_path(self, tmp_path):
+        input_path = tmp_path / "480p.mp4"
+        output_dir = tmp_path / "480p"
+        cmd = build_ffmpeg_remux_cmd(input_path, output_dir, segment_duration=6)
+        # Last arg should be the output playlist path
+        assert cmd[-1].endswith("playlist.m3u8")
+
+    def test_init_filename(self, tmp_path):
+        input_path = tmp_path / "1080p.mp4"
+        output_dir = tmp_path / "1080p"
+        cmd = build_ffmpeg_remux_cmd(input_path, output_dir, segment_duration=6)
+        assert "-hls_fmp4_init_filename" in cmd
+        assert "init.mp4" in cmd
+
+    def test_segment_filename_pattern(self, tmp_path):
+        input_path = tmp_path / "360p.mp4"
+        output_dir = tmp_path / "360p"
+        cmd = build_ffmpeg_remux_cmd(input_path, output_dir, segment_duration=6)
+        assert "-hls_segment_filename" in cmd
+        # Should contain a pattern with seg_ prefix
+        seg_idx = cmd.index("-hls_segment_filename") + 1
+        assert "seg_" in cmd[seg_idx]
+
+
+# ─── HLS: generate_master_playlist tests (T009) ──────────────────────────────
+
+
+class TestGenerateMasterPlaylist:
+    """Tests for generate_master_playlist() — validate HLS master playlist content."""
+
+    def test_four_tiers(self):
+        tiers = [
+            {"label": "360p", "bandwidth": 800000, "resolution": "640x360", "codecs": "avc1.4d401e,mp4a.40.2"},
+            {"label": "480p", "bandwidth": 1200000, "resolution": "854x480", "codecs": "avc1.4d401f,mp4a.40.2"},
+            {"label": "720p", "bandwidth": 2500000, "resolution": "1280x720", "codecs": "avc1.4d401f,mp4a.40.2"},
+            {"label": "1080p", "bandwidth": 5000000, "resolution": "1920x1080", "codecs": "avc1.64002a,mp4a.40.2"},
+        ]
+        content = generate_master_playlist(tiers)
+
+        assert "#EXTM3U" in content
+        assert "#EXT-X-VERSION:7" in content
+        assert "#EXT-X-INDEPENDENT-SEGMENTS" in content
+        assert content.count("#EXT-X-STREAM-INF") == 4
+        assert "360p/playlist.m3u8" in content
+        assert "1080p/playlist.m3u8" in content
+        assert "BANDWIDTH=800000" in content
+        assert "BANDWIDTH=5000000" in content
+        assert "RESOLUTION=640x360" in content
+        assert "RESOLUTION=1920x1080" in content
+
+    def test_two_tiers(self):
+        tiers = [
+            {"label": "360p", "bandwidth": 800000, "resolution": "640x360", "codecs": "avc1.4d401e,mp4a.40.2"},
+            {"label": "720p", "bandwidth": 2500000, "resolution": "1280x720", "codecs": "avc1.4d401f,mp4a.40.2"},
+        ]
+        content = generate_master_playlist(tiers)
+
+        assert content.count("#EXT-X-STREAM-INF") == 2
+        assert "480p" not in content
+        assert "1080p" not in content
+
+    def test_single_tier(self):
+        tiers = [
+            {"label": "720p", "bandwidth": 2500000, "resolution": "1280x720", "codecs": "avc1.4d401f,mp4a.40.2"},
+        ]
+        content = generate_master_playlist(tiers)
+
+        assert content.count("#EXT-X-STREAM-INF") == 1
+        assert "720p/playlist.m3u8" in content
+
+    def test_codecs_in_stream_inf(self):
+        tiers = [
+            {"label": "720p", "bandwidth": 2500000, "resolution": "1280x720", "codecs": "avc1.4d401f,mp4a.40.2"},
+        ]
+        content = generate_master_playlist(tiers)
+        assert 'CODECS="avc1.4d401f,mp4a.40.2"' in content
+
+
+# ─── HLS: build_r2_key_hls tests (T010) ──────────────────────────────────────
+
+
+class TestBuildR2KeyHls:
+    """Tests for build_r2_key_hls() — folder-per-video R2 key structure."""
+
+    def test_master_playlist_key(self):
+        key = build_r2_key_hls("@handle", "2024-03-15T10:00:00Z", "vid123", "master.m3u8")
+        assert key == "@handle/2024-03/vid123/master.m3u8"
+
+    def test_tier_playlist_key(self):
+        key = build_r2_key_hls("@handle", "2024-03-15T10:00:00Z", "vid123", "720p/playlist.m3u8")
+        assert key == "@handle/2024-03/vid123/720p/playlist.m3u8"
+
+    def test_segment_key(self):
+        key = build_r2_key_hls("@handle", "2024-03-15T10:00:00Z", "vid123", "720p/seg_000.m4s")
+        assert key == "@handle/2024-03/vid123/720p/seg_000.m4s"
+
+    def test_init_segment_key(self):
+        key = build_r2_key_hls("@handle", "2024-03-15T10:00:00Z", "vid123", "720p/init.mp4")
+        assert key == "@handle/2024-03/vid123/720p/init.mp4"
+
+    def test_thumbnail_key(self):
+        key = build_r2_key_hls("@handle", "2024-03-15T10:00:00Z", "vid123", "thumb.jpg")
+        assert key == "@handle/2024-03/vid123/thumb.jpg"
+
+    def test_subtitle_key(self):
+        key = build_r2_key_hls("@handle", "2024-03-15T10:00:00Z", "vid123", "subs.en.vtt")
+        assert key == "@handle/2024-03/vid123/subs.en.vtt"
+
+    def test_handle_without_at(self):
+        key = build_r2_key_hls("handle", "2024-03-15T10:00:00Z", "vid123", "master.m3u8")
+        assert key == "@handle/2024-03/vid123/master.m3u8"
+
+    def test_missing_published_at(self):
+        key = build_r2_key_hls("@handle", None, "vid123", "master.m3u8")
+        assert key == "@handle/unknown-00/vid123/master.m3u8"
+
+
+# ─── HLS: graceful missing tier handling tests (T011) ─────────────────────────
+
+
+class TestMissingTierHandling:
+    """Tests for graceful handling of missing tiers — master playlist with only available tiers."""
+
+    def test_two_of_four_tiers_produces_valid_playlist(self):
+        # Simulates only 360p and 720p successfully downloaded
+        completed_tiers = [
+            {"label": "360p", "bandwidth": 800000, "resolution": "640x360", "codecs": "avc1.4d401e,mp4a.40.2"},
+            {"label": "720p", "bandwidth": 2500000, "resolution": "1280x720", "codecs": "avc1.4d401f,mp4a.40.2"},
+        ]
+        content = generate_master_playlist(completed_tiers)
+
+        assert content.count("#EXT-X-STREAM-INF") == 2
+        assert "360p/playlist.m3u8" in content
+        assert "720p/playlist.m3u8" in content
+        assert "480p" not in content
+        assert "1080p" not in content
+
+    def test_single_tier_produces_valid_playlist(self):
+        completed_tiers = [
+            {"label": "480p", "bandwidth": 1200000, "resolution": "854x480", "codecs": "avc1.4d401f,mp4a.40.2"},
+        ]
+        content = generate_master_playlist(completed_tiers)
+
+        assert "#EXTM3U" in content
+        assert content.count("#EXT-X-STREAM-INF") == 1
+
+
+# ─── HLS: minimum tier enforcement tests (T012) ──────────────────────────────
+
+
+class TestMinTierEnforcement:
+    """Tests for minimum tier enforcement — 0 tiers should fail."""
+
+    def test_zero_tiers_raises(self):
+        with pytest.raises(ValueError, match="[Nn]o.*tier|[Mm]inimum"):
+            generate_master_playlist([])
+
+    def test_one_tier_succeeds(self):
+        tiers = [
+            {"label": "720p", "bandwidth": 2500000, "resolution": "1280x720", "codecs": "avc1.4d401f,mp4a.40.2"},
+        ]
+        content = generate_master_playlist(tiers)
+        assert "#EXTM3U" in content
+
+
+# ─── US4: Legacy MP4 cleanup tests (T026) ────────────────────────────────────
+
+
+class TestLegacyMp4Cleanup:
+    """Tests for cleanup_legacy_mp4() — delete old MP4 from R2 after HLS upload."""
+
+    def test_deletes_old_mp4_and_sidecars(self):
+        """Given a video with existing .mp4 in R2, after HLS upload old files are deleted."""
+        r2_client = MagicMock()
+        client = MagicMock()
+
+        # Simulate DB returning old media_path
+        client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[{"media_path": "@ch/2024-03/vid.mp4",
+                   "thumbnail_path": "@ch/2024-03/vid.jpg",
+                   "subtitle_path": "@ch/2024-03/vid.en.vtt"}]
+        )
+
+        cleanup_legacy_mp4(client, r2_client, "bucket", "vid")
+
+        # Should delete old MP4 + sidecars + info.json
+        assert r2_client.delete_object.call_count >= 3
+
+    def test_skips_if_already_hls(self):
+        """If media_path already ends in .m3u8, no cleanup needed."""
+        r2_client = MagicMock()
+        client = MagicMock()
+
+        client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[{"media_path": "@ch/2024-03/vid/master.m3u8",
+                   "thumbnail_path": "@ch/2024-03/vid/thumb.jpg",
+                   "subtitle_path": None}]
+        )
+
+        cleanup_legacy_mp4(client, r2_client, "bucket", "vid")
+
+        r2_client.delete_object.assert_not_called()
+
+    def test_skips_if_no_media_path(self):
+        """If video has no media_path, no cleanup needed."""
+        r2_client = MagicMock()
+        client = MagicMock()
+
+        client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[{"media_path": None, "thumbnail_path": None, "subtitle_path": None}]
+        )
+
+        cleanup_legacy_mp4(client, r2_client, "bucket", "vid")
+
+        r2_client.delete_object.assert_not_called()
