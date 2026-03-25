@@ -6,7 +6,7 @@ producer:
   # The producer pages through the API until it accumulates this many
   # videos that pass the duration filter, hits the date boundary, or
   # exhausts the channel — whichever comes first.
-  max_videos_per_channel: 250
+  max_videos_per_channel: 10
 
   # Minimum duration in seconds. Videos shorter than this are skipped.
   # Set to 60 to only exclude Shorts; 300 = 5 min+ content only.

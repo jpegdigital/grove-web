@@ -42,7 +42,6 @@ COOKIES_FILE = PROJECT_ROOT / "config" / "cookies.txt"
 
 # Legacy ytdl-sub media directory — used for initial seeding only.
 # Files here are uploaded to R2 and then deleted. Drop this once seeding is complete.
-LEGACY_MEDIA_DIR = Path("E:/Entertainment/PradoTube")
 
 # Fix Windows console encoding for unicode
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
@@ -180,29 +179,6 @@ def create_r2_client():
 # ─── Utility Functions ────────────────────────────────────────────────────────
 
 
-def build_r2_key(channel_handle: str, published_at: str | None, video_id: str, ext: str) -> str:
-    """Build R2 object key: {handle}/{YYYY}-{MM}/{video_id}.{ext}"""
-    # Normalize handle: ensure it starts with @
-    handle = channel_handle if channel_handle.startswith("@") else f"@{channel_handle}"
-
-    # Parse year/month from published_at (ISO 8601 string)
-    if published_at:
-        try:
-            dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
-            year = f"{dt.year:04d}"
-            month = f"{dt.month:02d}"
-        except (ValueError, AttributeError):
-            year = "unknown"
-            month = "00"
-    else:
-        year = "unknown"
-        month = "00"
-
-    # Normalize ext: remove leading dot if present
-    ext = ext.lstrip(".")
-
-    return f"{handle}/{year}-{month}/{video_id}.{ext}"
-
 
 def parse_info_json(info_path: Path) -> dict | None:
     """Extract video metadata fields from yt-dlp's .info.json file."""
@@ -256,33 +232,6 @@ def parse_info_json(info_path: Path) -> dict | None:
     }
 
 
-def upload_to_r2(r2_client, bucket: str, local_path: Path, r2_key: str) -> bool:
-    """Upload a single file to R2. Returns True on success, False on failure."""
-    from botocore.exceptions import ClientError
-
-    mime_type, _ = mimetypes.guess_type(str(local_path))
-    if not mime_type:
-        mime_type = "application/octet-stream"
-
-    try:
-        file_size = local_path.stat().st_size
-        r2_client.upload_file(
-            str(local_path),
-            bucket,
-            r2_key,
-            ExtraArgs={"ContentType": mime_type},
-        )
-        size_mb = file_size / (1024 * 1024)
-        print(f"    Uploaded {r2_key} ({size_mb:.1f} MB, {mime_type})")
-        return True
-    except ClientError as e:
-        error_code = e.response.get("Error", {}).get("Code", "Unknown")
-        error_msg = e.response.get("Error", {}).get("Message", str(e))
-        print(f"    FAILED {r2_key}: [{error_code}] {error_msg}")
-        return False
-    except OSError as e:
-        print(f"    FAILED {r2_key}: file read error: {e}")
-        return False
 
 
 def resolve_channel_handle(client, job: dict) -> str:
@@ -887,53 +836,8 @@ def download_video(video_id: str, staging_dir: Path, config: dict) -> tuple[bool
     return (result.returncode == 0, result.stderr)
 
 
-def collect_downloaded_files(staging_dir: Path, video_id: str) -> dict[str, Path]:
-    """Glob staging dir to find video, thumbnail, subtitle, info.json files."""
-    files: dict[str, Path] = {}
-
-    for path in staging_dir.iterdir():
-        if not path.name.startswith(video_id):
-            continue
-
-        name = path.name
-        suffix = path.suffix.lower()
-
-        if suffix == ".mp4":
-            files["video"] = path
-        elif suffix in (".jpg", ".jpeg", ".webp", ".png"):
-            files["thumbnail"] = path
-        elif suffix == ".vtt" or name.endswith(".vtt"):
-            files["subtitle"] = path
-        elif name.endswith(".info.json"):
-            files["info_json"] = path
-
-    return files
 
 
-def upload_video_files(
-    r2_client, bucket: str, files: dict[str, Path],
-    channel_handle: str, published_at: str | None, video_id: str,
-) -> dict[str, str]:
-    """Upload each downloaded file to R2. Returns dict of {type: r2_key}."""
-    r2_keys: dict[str, str] = {}
-
-    for file_type, local_path in files.items():
-        ext = local_path.suffix.lstrip(".")
-        # For subtitle files like video_id.en.vtt, use full suffix
-        if file_type == "subtitle":
-            # Extract everything after video_id: e.g. ".en.vtt"
-            rest = local_path.name[len(video_id):]
-            ext = rest.lstrip(".")
-        elif file_type == "info_json":
-            ext = "info.json"
-
-        r2_key = build_r2_key(channel_handle, published_at, video_id, ext)
-        if upload_to_r2(r2_client, bucket, local_path, r2_key):
-            r2_keys[file_type] = r2_key
-        else:
-            raise RuntimeError(f"Failed to upload {file_type}: {local_path}")
-
-    return r2_keys
 
 
 def upsert_video_record(
@@ -986,97 +890,6 @@ def cleanup_staging(staging_dir: Path):
         print(f"  Warning: staging cleanup failed: {e}")
 
 
-def find_legacy_files(video_id: str, channel_handle: str | None = None, published_at: str | None = None) -> dict[str, Path] | None:
-    """Check LEGACY_MEDIA_DIR for existing ytdl-sub downloads.
-
-    If channel_handle and published_at are provided, checks the expected path
-    directly (fast). Otherwise falls back to a full walk (slow but thorough).
-    Returns file dict or None if not found.
-    """
-    if not LEGACY_MEDIA_DIR.exists():
-        return None
-
-    # Fast path: check expected location directly
-    if channel_handle and published_at:
-        handle = channel_handle if channel_handle.startswith("@") else f"@{channel_handle}"
-        try:
-            dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
-            month_dir = LEGACY_MEDIA_DIR / handle / f"{dt.year:04d}-{dt.month:02d}"
-            info_path = month_dir / f"{video_id}.info.json"
-            if info_path.exists():
-                return collect_downloaded_files(month_dir, video_id)
-        except (ValueError, AttributeError):
-            pass
-
-    # Slow fallback: walk all @handle/YYYY-MM/ directories
-    for handle_dir in LEGACY_MEDIA_DIR.iterdir():
-        if not handle_dir.is_dir():
-            continue
-        for month_dir in handle_dir.iterdir():
-            if not month_dir.is_dir():
-                continue
-            info_path = month_dir / f"{video_id}.info.json"
-            if info_path.exists():
-                return collect_downloaded_files(month_dir, video_id)
-
-    return None
-
-
-def cleanup_legacy_mp4(client, r2_client, bucket: str, video_id: str):
-    """Delete old progressive MP4 and sidecars from R2 when re-processing to HLS.
-
-    Checks if the video previously had a .mp4 media_path. If so, deletes the
-    old MP4, thumbnail, subtitle, and info.json from R2 to reclaim storage.
-    Skips if already HLS or no media_path.
-    """
-    from botocore.exceptions import ClientError
-
-    # Look up current media_path from DB
-    resp = (
-        client.table("videos")
-        .select("media_path, thumbnail_path, subtitle_path")
-        .eq("youtube_id", video_id)
-        .limit(1)
-        .execute()
-    )
-
-    if not resp.data:
-        return
-
-    row = resp.data[0]
-    media_path = row.get("media_path")
-
-    # Skip if no media_path or already HLS
-    if not media_path or media_path.endswith(".m3u8"):
-        return
-
-    # Delete old MP4 + sidecars from R2
-    paths_to_delete = [media_path]
-    if row.get("thumbnail_path"):
-        paths_to_delete.append(row["thumbnail_path"])
-    if row.get("subtitle_path"):
-        paths_to_delete.append(row["subtitle_path"])
-
-    # Derive info.json key from media_path
-    info_key = str(Path(media_path).with_suffix(".info.json")).replace("\\", "/")
-    paths_to_delete.append(info_key)
-
-    for r2_key in paths_to_delete:
-        try:
-            r2_client.delete_object(Bucket=bucket, Key=r2_key)
-        except ClientError:
-            pass  # Best-effort cleanup
-
-
-def purge_legacy_files(files: dict[str, Path], verbose: bool):
-    """Delete local legacy files after successful R2 upload."""
-    for ftype, fpath in files.items():
-        try:
-            fpath.unlink()
-            if verbose:
-                print(f"    Purged legacy: {fpath}")
-        except OSError as e:
-            print(f"    Warning: could not purge {fpath}: {e}")
 
 
 def process_download_job(
@@ -1102,50 +915,14 @@ def process_download_job(
     published_at = metadata.get("published_at")
 
     if dry_run:
-        local = find_legacy_files(video_id, channel_handle, published_at)
-        source = "local" if local else "yt-dlp (HLS 4-tier)"
-        print(f"    DRY RUN: would download {video_id} \"{title}\" (source: {source})")
+        print(f"    DRY RUN: would download {video_id} \"{title}\"")
         return True
-
-    # Check legacy media directory first — skip yt-dlp if files exist locally
-    legacy_files = find_legacy_files(video_id, channel_handle, published_at)
-    use_legacy = legacy_files and "video" in legacy_files
 
     # Create per-job staging directory
     job_staging = STAGING_DIR / video_id
     job_staging.mkdir(parents=True, exist_ok=True)
 
     try:
-        if use_legacy:
-            # ─── Legacy path: single-file upload (for local ytdl-sub files) ───
-            files = legacy_files
-            if verbose:
-                print(f"    Found locally in {list(files.values())[0].parent}")
-                for ftype, fpath in files.items():
-                    size_mb = fpath.stat().st_size / (1024 * 1024)
-                    print(f"    Found {ftype}: {fpath.name} ({size_mb:.1f} MB)")
-
-            # Parse info.json
-            info_data = {}
-            if "info_json" in files:
-                parsed = parse_info_json(files["info_json"])
-                if parsed:
-                    info_data = parsed
-                    if not published_at and info_data.get("published_at"):
-                        published_at = info_data["published_at"]
-                    if channel_handle == "unknown" and info_data.get("handle"):
-                        channel_handle = info_data["handle"]
-
-            # Upload legacy files (single MP4)
-            r2_keys = upload_video_files(
-                r2_client, bucket, files, channel_handle, published_at, video_id,
-            )
-            upsert_video_record(client, video_id, channel_id, info_data, r2_keys, source_tags)
-            complete_job(client, job["id"])
-            purge_legacy_files(legacy_files, verbose)
-            return True
-
-        # ─── HLS path: multi-tier download → remux → upload ──────────────
         hls_cfg = config.get("hls", {})
         min_tiers = hls_cfg.get("min_tiers", 1)
 
@@ -1203,10 +980,7 @@ def process_download_job(
         if verbose:
             print(f"    Generated master.m3u8 with {len(playlist_tiers)} variant(s)")
 
-        # 5. Clean up legacy MP4 from R2 if re-processing
-        cleanup_legacy_mp4(client, r2_client, bucket, video_id)
-
-        # 6. Upload complete HLS package to R2
+        # 5. Upload complete HLS package to R2
         if verbose:
             print(f"    Uploading HLS package to R2...")
         r2_keys = upload_hls_package(

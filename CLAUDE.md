@@ -32,7 +32,7 @@ uv run python scripts/sync_producer.py --verbose         # per-video scoring det
 
 ### Consumer — processes jobs from the queue
 
-Picks pending jobs from `sync_queue`, downloads 4 quality tiers (360p/480p/720p/1080p) via yt-dlp, remuxes each into HLS fMP4 segments via `ffmpeg -c copy`, generates master.m3u8, uploads the HLS package to R2, and upserts video records. Also handles removals (delete R2 files, clear video record). Legacy MP4-only videos still play — the player detects `.m3u8` vs `.mp4` automatically.
+Picks pending jobs from `sync_queue`, downloads 2 quality tiers (480p/720p) via yt-dlp, remuxes each into HLS fMP4 segments via `ffmpeg -c copy`, generates master.m3u8, uploads the HLS package to R2, and upserts video records. Also handles removals (delete R2 files, clear video record).
 
 **Requires**: ffmpeg on PATH (for HLS remux)
 
@@ -115,8 +115,8 @@ specs/              # Feature specs and plans
 - Videos only appear in the feed when `r2_synced_at IS NOT NULL` — the consumer sets this after R2 upload
 - Producer never downloads files or touches R2; consumer never calls YouTube API — they communicate via `sync_queue`
 - Consumer calls yt-dlp via subprocess (never `import yt_dlp`) — CLI is the stable interface
-- HLS R2 keys follow `@handle/YYYY-MM/video_id/master.m3u8` with per-tier subdirectories (360p/, 480p/, 720p/, 1080p/)
-- Legacy MP4 R2 keys follow `@handle/YYYY-MM/video_id.ext` pattern — flat per-month directories
+- HLS R2 keys follow `@handle/YYYY-MM/video_id/master.m3u8` with per-tier subdirectories (480p/, 720p/)
+- Legacy MP4 files in R2 are orphaned — no DB rows reference them
 - Config lives in `config/producer.yaml` and `config/consumer.yaml` — no magic numbers in scripts
 - HLS config (tiers, segment_duration, min_tiers) is in `config/consumer.yaml` under the `hls:` section
 - See `docs/architecture/` for detailed pipeline docs

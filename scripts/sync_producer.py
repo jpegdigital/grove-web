@@ -621,6 +621,7 @@ def fetch_reserved_video_ids(client, channel_id: str) -> set[str]:
         client.table("videos")
         .select("youtube_id")
         .eq("channel_id", channel_id)
+        .filter("r2_synced_at", "not.is", "null")
         .overlaps("source_tags", ["popular", "rated"])
         .execute()
     )
@@ -628,7 +629,7 @@ def fetch_reserved_video_ids(client, channel_id: str) -> set[str]:
 
 
 def fetch_existing_video_ids(client, channel_id: str) -> set[str]:
-    """Fetch all video youtube_ids for a channel from the videos table."""
+    """Fetch youtube_ids for R2-synced videos in a channel."""
     video_ids: set[str] = set()
     offset = 0
     page_size = CFG["db"]["page_size"]
@@ -638,6 +639,7 @@ def fetch_existing_video_ids(client, channel_id: str) -> set[str]:
             client.table("videos")
             .select("youtube_id")
             .eq("channel_id", channel_id)
+            .filter("r2_synced_at", "not.is", "null")
             .range(offset, offset + page_size - 1)
             .execute()
         )
@@ -652,7 +654,7 @@ def fetch_existing_video_ids(client, channel_id: str) -> set[str]:
 
 
 def fetch_existing_videos(client, channel_id: str) -> dict[str, dict]:
-    """Fetch existing video rows with R2 paths for remove job metadata."""
+    """Fetch R2-synced video rows with paths for remove job metadata."""
     results: dict[str, dict] = {}
     offset = 0
     page_size = CFG["db"]["page_size"]
@@ -662,6 +664,7 @@ def fetch_existing_videos(client, channel_id: str) -> dict[str, dict]:
             client.table("videos")
             .select("youtube_id, media_path, thumbnail_path, subtitle_path, title")
             .eq("channel_id", channel_id)
+            .filter("r2_synced_at", "not.is", "null")
             .range(offset, offset + page_size - 1)
             .execute()
         )
@@ -860,7 +863,8 @@ def process_channel(
         existing_ids = set(existing_videos.keys())
 
         to_download = desired_ids - existing_ids
-        to_remove = (existing_ids - desired_ids) - reserved_ids  # never remove reserved
+        to_remove = set()  # TEMP: pausig removals during initial seeding
+        # to_remove = (existing_ids - desired_ids) - reserved_ids  # never remove reserved
 
         if verbose:
             score_range = ""
@@ -982,7 +986,8 @@ def process_channel(
         # 6. Fetch existing, compute full diff
         existing_videos = fetch_existing_videos(client, channel_id)
         existing_ids = set(existing_videos.keys())
-        to_download, to_remove = compute_diff(desired_ids, existing_ids)
+        to_download, _to_remove = compute_diff(desired_ids, existing_ids)
+        to_remove = set()  # TEMP: pausing removals during initial seeding
 
         if verbose:
             pop_count = sum(1 for v in desired if "popular" in v.get("source_tags", []))
@@ -1177,31 +1182,32 @@ def main() -> None:
 
     # Orphaned channel cleanup
     curated_ids = {c["channel_id"] for c in channels}
-    if not args.channel:
-        print("\nChecking for orphaned channels...")
-        try:
-            orphaned = fetch_orphaned_channel_ids(client, curated_ids)
-            if orphaned:
-                print(f"  Found {len(orphaned)} orphaned channel(s)")
-                for oc_id in orphaned:
-                    orphan_vids = fetch_existing_video_ids(client, oc_id)
-                    if orphan_vids:
-                        remove_jobs = [
-                            {
-                                "video_id": vid,
-                                "channel_id": oc_id,
-                                "action": "remove",
-                                "metadata": {},
-                            }
-                            for vid in orphan_vids
-                        ]
-                        rm_count = enqueue_jobs(client, remove_jobs, args.dry_run)
-                        total_removals += rm_count
-                        print(f"    {oc_id}: {rm_count} remove jobs")
-            else:
-                print("  No orphaned channels found")
-        except Exception as e:
-            print(f"  ERROR checking orphaned channels: {e}")
+    # TEMP: pausing removals during initial seeding
+    # if not args.channel:
+    #     print("\nChecking for orphaned channels...")
+    #     try:
+    #         orphaned = fetch_orphaned_channel_ids(client, curated_ids)
+    #         if orphaned:
+    #             print(f"  Found {len(orphaned)} orphaned channel(s)")
+    #             for oc_id in orphaned:
+    #                 orphan_vids = fetch_existing_video_ids(client, oc_id)
+    #                 if orphan_vids:
+    #                     remove_jobs = [
+    #                         {
+    #                             "video_id": vid,
+    #                             "channel_id": oc_id,
+    #                             "action": "remove",
+    #                             "metadata": {},
+    #                         }
+    #                         for vid in orphan_vids
+    #                     ]
+    #                     rm_count = enqueue_jobs(client, remove_jobs, args.dry_run)
+    #                     total_removals += rm_count
+    #                     print(f"    {oc_id}: {rm_count} remove jobs")
+    #         else:
+    #             print("  No orphaned channels found")
+    #     except Exception as e:
+    #         print(f"  ERROR checking orphaned channels: {e}")
 
     # Summary
     elapsed = time.time() - start_time
