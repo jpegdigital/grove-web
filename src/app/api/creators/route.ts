@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/server";
 
 function slugify(name: string): string {
   return name
@@ -22,6 +22,8 @@ export async function POST(request: NextRequest) {
     }
 
     const slug = slugify(name.trim());
+
+    const supabase = await createClient();
 
     // Get next display_order
     const { data: existing } = await supabase

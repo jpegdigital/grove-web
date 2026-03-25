@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/client";
 import {
   scoreFeed,
   diversify,
@@ -43,6 +43,7 @@ type CreatorInfo = {
   id: string;
   name: string;
   slug: string;
+  sortName: string;
   displayOrder: number;
   avatarChannelId: string | null;
 };
@@ -63,12 +64,14 @@ async function fetchFeedData(creatorSlug: string | null): Promise<{
   total: number;
   creators: FeedCreator[];
 }> {
+  const supabase = createClient();
+
   // Step 1: Build channel → creator mapping from curated_channels
   const { data: curatedRows, error: curatedErr } = await supabase
     .from("curated_channels")
     .select(
       `channel_id, creator_id, priority,
-       creators(id, name, slug, display_order, avatar_channel_id, priority),
+       creators(id, name, slug, sort_name, display_order, avatar_channel_id, priority),
        channels(youtube_id, title, thumbnail_url)`
     )
     .order("display_order", { ascending: true });
@@ -92,6 +95,7 @@ async function fetchFeedData(creatorSlug: string | null): Promise<{
       id: string;
       name: string;
       slug: string;
+      sort_name: string;
       display_order: number;
       avatar_channel_id: string | null;
       priority: number;
@@ -108,6 +112,7 @@ async function fetchFeedData(creatorSlug: string | null): Promise<{
             id: cr.id,
             name: cr.name,
             slug: cr.slug,
+            sortName: cr.sort_name,
             displayOrder: cr.display_order,
             avatarChannelId: cr.avatar_channel_id,
           }
@@ -234,7 +239,7 @@ function buildCreatorList(
 ): FeedCreator[] {
   const seen = new Map<
     string,
-    { slug: string; name: string; avatar: string; order: number }
+    { slug: string; name: string; sortName: string; avatar: string }
   >();
 
   for (const v of videos) {
@@ -254,16 +259,13 @@ function buildCreatorList(
     seen.set(v.creatorId, {
       slug: creator.slug,
       name: creator.name,
+      sortName: creator.sortName,
       avatar,
-      order: creator.displayOrder,
     });
   }
 
   return [...seen.entries()]
-    .sort((a, b) => {
-      const stripThe = (s: string) => s.replace(/^The\s+/i, "");
-      return stripThe(a[1].name).localeCompare(stripThe(b[1].name));
-    })
+    .sort((a, b) => a[1].sortName.localeCompare(b[1].sortName))
     .map(([id, info]) => ({
       id,
       slug: info.slug,

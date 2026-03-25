@@ -8,11 +8,11 @@ import {
   Tv,
   Sun,
   Moon,
-  Settings,
   ChevronDown,
 } from "lucide-react";
 import { VideoCard } from "@/components/video-card";
 import { CreatorChips } from "@/components/creator-chips";
+import { UserNav } from "@/components/user-nav";
 import { useFeed, type FeedVideo } from "@/hooks/use-feed";
 import { useDeferredLoading } from "@/hooks/use-deferred-loading";
 
@@ -200,16 +200,9 @@ export function FeedView({ creatorSlug }: { creatorSlug: string | null }) {
             No videos available yet
           </h1>
           <p className="font-body max-w-md text-muted-foreground">
-            Videos will appear here once they&rsquo;ve been downloaded. Head to
-            the admin panel to manage your channels.
+            No videos available yet. Ask a parent to set up your
+            subscriptions!
           </p>
-          <Link
-            href="/admin"
-            className="font-body mt-2 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm text-white font-bold shadow-md shadow-primary/25 transition-all hover:shadow-lg hover:shadow-primary/30 hover:-translate-y-0.5"
-          >
-            <Settings className="h-4 w-4" />
-            Open Admin Panel
-          </Link>
         </div>
       </div>
     );
@@ -363,12 +356,7 @@ function FeedHeader({
               <Moon className="h-4 w-4" />
             )}
           </button>
-          <Link
-            href="/admin"
-            className="rounded-xl p-2 text-muted-foreground transition-all hover:bg-primary/10 hover:text-primary"
-          >
-            <Settings className="h-4 w-4" />
-          </Link>
+          <UserNav />
         </div>
       </div>
     </header>

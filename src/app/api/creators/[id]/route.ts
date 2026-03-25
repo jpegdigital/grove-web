@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/server";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params;
+    const supabase = await createClient();
     const body = await request.json();
     const updates: Record<string, unknown> = {};
 
@@ -63,6 +64,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params;
+    const supabase = await createClient();
 
     const { error } = await supabase.from("creators").delete().eq("id", id);
 

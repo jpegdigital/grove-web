@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Toaster, toast } from "sonner";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/client";
 import { StarRating } from "@/components/ui/star-rating";
 import {
   Search,
@@ -41,6 +41,8 @@ import {
   CloudUpload,
   Star,
 } from "lucide-react";
+
+const supabase = createClient();
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -271,7 +273,7 @@ export default function AdminPage() {
   const totalDownloaded = [...videoCounts.values()].reduce((s, c) => s + c.downloaded, 0);
   const totalUploaded = [...videoCounts.values()].reduce((s, c) => s + c.uploaded, 0);
 
-  const creators = [...(creatorsData?.creators || [])].sort((a, b) => a.name.localeCompare(b.name));
+  const creators = creatorsData?.creators || [];
   const ungroupedChannels = creatorsData?.ungrouped || [];
 
   const toggleCreateForm = useCallback(() => {
@@ -1408,8 +1410,8 @@ function MoveToGroupDropdown({
               <div className="my-1 border-t border-border" />
             )}
 
-            {/* Creator options (sorted alphabetically) */}
-            {[...creators].sort((a, b) => a.name.localeCompare(b.name)).map((creator) => (
+            {/* Creator options (sorted alphabetically via sort_name) */}
+            {creators.map((creator) => (
               <button
                 key={creator.id}
                 onClick={() => {

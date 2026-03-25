@@ -1,10 +1,5 @@
 import { NextRequest } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
-);
+import { createClient } from "@/lib/supabase/server";
 
 /**
  * Metadata returned for a single video.
@@ -80,6 +75,7 @@ export async function GET(
  * Returns VideoMeta built from DB columns, or null if not found/not downloaded.
  */
 async function findVideoFromDb(videoId: string): Promise<VideoMeta | null> {
+  const supabase = await createClient();
   const { data: row, error } = await supabase
     .from("videos")
     .select(

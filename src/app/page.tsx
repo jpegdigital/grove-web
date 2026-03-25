@@ -9,14 +9,15 @@ import {
   Tv,
   Sun,
   Moon,
-  Settings,
   Play,
 } from "lucide-react";
 import {
   fetchCreatorsLightweight,
   type CreatorLightweight,
 } from "@/lib/queries/creators";
+import { createClient } from "@/lib/supabase/client";
 import { useDeferredLoading } from "@/hooks/use-deferred-loading";
+import { UserNav } from "@/components/user-nav";
 
 /* ─── Types ─── */
 
@@ -193,17 +194,29 @@ export default function Home() {
   useEffect(() => setMounted(true), []);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["creators"],
-    queryFn: fetchCreatorsLightweight,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    queryKey: ["creators-subscribed"],
+    queryFn: async () => {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+
+      const allCreators = await fetchCreatorsLightweight();
+
+      // Filter by subscriptions
+      const { data: subs } = await supabase
+        .from("user_subscriptions")
+        .select("creator_id")
+        .eq("user_id", user!.id);
+
+      const subscribedIds = new Set((subs ?? []).map((s) => s.creator_id));
+      return allCreators.filter((c) => subscribedIds.has(c.id));
+    },
+    staleTime: 5 * 60 * 1000,
   });
 
   const showSkeleton = useDeferredLoading(isLoading);
   const dataReady = !showSkeleton && !isLoading;
 
-  const creators = [...(data ?? [])].sort((a, b) =>
-    a.name.localeCompare(b.name)
-  );
+  const creators = data ?? [];
 
   // Empty state (only after loading completes)
   if (dataReady && creators.length === 0) {
@@ -218,15 +231,15 @@ export default function Home() {
             No creators yet
           </h1>
           <p className="font-body max-w-md text-muted-foreground">
-            Head to the admin panel to add some channels and creators, then come
-            back here for the good stuff.
+            No creators are subscribed for your account yet. Ask a parent to set
+            up your feed!
           </p>
           <Link
-            href="/admin"
+            href="/feed"
             className="font-body mt-2 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm text-white font-bold shadow-md shadow-primary/25 transition-all hover:shadow-lg hover:shadow-primary/30 hover:-translate-y-0.5"
           >
-            <Settings className="h-4 w-4" />
-            Open Admin Panel
+            <Play className="h-4 w-4" />
+            Go to Feed
           </Link>
         </div>
       </div>
@@ -276,12 +289,7 @@ export default function Home() {
                 <Moon className="h-4 w-4" />
               )}
             </button>
-            <Link
-              href="/admin"
-              className="rounded-xl p-2 text-muted-foreground transition-all hover:bg-primary/10 hover:text-primary"
-            >
-              <Settings className="h-4 w-4" />
-            </Link>
+            <UserNav />
           </div>
         </div>
       </header>

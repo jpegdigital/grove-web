@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/client";
 
 /* ─── Types ─── */
 
@@ -53,6 +53,7 @@ export interface CreatorsWithChannelsResponse {
 export async function fetchCreatorsLightweight(): Promise<
   CreatorLightweight[]
 > {
+  const supabase = createClient();
   const { data: creators, error } = await supabase
     .from("creators")
     .select(
@@ -60,7 +61,7 @@ export async function fetchCreatorsLightweight(): Promise<
        avatar_channel:channels!avatar_channel_id(thumbnail_url),
        cover_channel:channels!cover_channel_id(thumbnail_url, banner_url)`
     )
-    .order("display_order", { ascending: true });
+    .order("sort_name", { ascending: true });
 
   if (error) throw new Error("Failed to load creators");
 
@@ -78,6 +79,7 @@ export async function fetchCreatorsLightweight(): Promise<
 /* ─── Full nested query (admin panel) ─── */
 
 export async function fetchCreatorsWithChannels(): Promise<CreatorsWithChannelsResponse> {
+  const supabase = createClient();
   const [creatorsResult, ungroupedResult] = await Promise.all([
     supabase
       .from("creators")
@@ -88,7 +90,7 @@ export async function fetchCreatorsWithChannels(): Promise<CreatorsWithChannelsR
            channels(youtube_id, title, description, custom_url, thumbnail_url, banner_url, subscriber_count, video_count, view_count)
          )`
       )
-      .order("display_order", { ascending: true }),
+      .order("sort_name", { ascending: true }),
     supabase
       .from("curated_channels")
       .select(
