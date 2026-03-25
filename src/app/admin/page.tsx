@@ -37,7 +37,6 @@ import {
   PanelRightOpen,
   LayoutGrid,
   LayoutList,
-  HardDrive,
   CloudUpload,
   Star,
 } from "lucide-react";
@@ -270,7 +269,6 @@ export default function AdminPage() {
   const isHydrated = !isHydrating && !isCreatorsLoading;
 
   // Aggregate video counts for header
-  const totalDownloaded = [...videoCounts.values()].reduce((s, c) => s + c.downloaded, 0);
   const totalUploaded = [...videoCounts.values()].reduce((s, c) => s + c.uploaded, 0);
 
   const creators = creatorsData?.creators || [];
@@ -738,10 +736,6 @@ export default function AdminPage() {
                 {creators.length} groups
               </span>
               <span className="flex items-center gap-1.5">
-                <HardDrive className="h-3.5 w-3.5" />
-                {totalDownloaded} dl
-              </span>
-              <span className="flex items-center gap-1.5">
                 <CloudUpload className="h-3.5 w-3.5" />
                 {totalUploaded} r2
               </span>
@@ -892,7 +886,6 @@ export default function AdminPage() {
                   const avatar = getCreatorAvatar(creator);
                   const cover = getCreatorCover(creator);
                   const channelCount = creator.curated_channels.length;
-                  const groupDl = creator.curated_channels.reduce((s, cc) => s + (videoCounts.get(cc.channel_id)?.downloaded ?? 0), 0);
                   const groupR2 = creator.curated_channels.reduce((s, cc) => s + (videoCounts.get(cc.channel_id)?.uploaded ?? 0), 0);
 
                   return (
@@ -970,8 +963,6 @@ export default function AdminPage() {
                                 size={12}
                               />
                               <span>{channelCount} ch</span>
-                              <span>·</span>
-                              <span>{groupDl} dl</span>
                               <span>·</span>
                               <span>{groupR2} r2</span>
                             </div>
@@ -1072,7 +1063,6 @@ export default function AdminPage() {
                                     onAssign={assignChannelToCreator}
                                     showUngroup
                                     onPriorityChange={updateChannelPriority}
-                                    downloadedCount={videoCounts.get(cc.channel_id)?.downloaded}
                                     uploadedCount={videoCounts.get(cc.channel_id)?.uploaded}
                                     dateRangeOverride={cc.date_range_override}
                                     onDateRangeChange={updateDateRange}
@@ -1124,7 +1114,6 @@ export default function AdminPage() {
                             onAssign={assignChannelToCreator}
                             showUngroup={false}
                             onPriorityChange={updateChannelPriority}
-                            downloadedCount={videoCounts.get(cc.channel_id)?.downloaded}
                             uploadedCount={videoCounts.get(cc.channel_id)?.uploaded}
                             dateRangeOverride={cc.date_range_override}
                             onDateRangeChange={updateDateRange}
@@ -1496,7 +1485,7 @@ const DATE_RANGE_OPTIONS = [
   { value: "today-1years", label: "1y" },
   { value: "today-2years", label: "2y" },
   { value: "today-5years", label: "5y" },
-  { value: "19700101", label: "All" },
+  { value: "all", label: "All" },
 ];
 
 function ChannelRow({
@@ -1507,7 +1496,6 @@ function ChannelRow({
   onAssign,
   showUngroup,
   onPriorityChange,
-  downloadedCount = 0,
   uploadedCount = 0,
   dateRangeOverride,
   onDateRangeChange,
@@ -1525,7 +1513,6 @@ function ChannelRow({
   ) => void;
   showUngroup: boolean;
   onPriorityChange: (curatedId: string, priority: number) => void;
-  downloadedCount?: number;
   uploadedCount?: number;
   dateRangeOverride?: string | null;
   onDateRangeChange?: (curatedId: string, value: string | null) => void;
@@ -1533,7 +1520,6 @@ function ChannelRow({
   onMinDurationChange?: (curatedId: string, value: number | null) => void;
 }) {
   const [editingPriority, setEditingPriority] = useState(false);
-  const priorityStars = (channel.priority / 20).toFixed(1).replace(/\.0$/, "");
 
   return (
     <div className="channel-row group/ch">
@@ -1551,12 +1537,76 @@ function ChannelRow({
 
         {/* Two-line content */}
         <div className="min-w-0 flex-1">
-          {/* Line 1: Name + hover actions */}
-          <div className="flex items-center gap-1">
-            <p className="font-body truncate text-sm font-medium leading-snug text-foreground">
+          {/* Line 1: Name (clamped) + subs + vids */}
+          <div className="flex items-center gap-1.5">
+            <p className="font-body min-w-0 truncate text-sm font-medium leading-snug text-foreground">
               {channel.title}
             </p>
-            {/* Hover actions — hidden until row hover */}
+            <div className="font-body ml-auto flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+              <span>{formatCount(channel.subscriberCount)} subs</span>
+              <span>·</span>
+              <span>{formatCount(channel.videoCount)} vids</span>
+            </div>
+          </div>
+
+          {/* Line 2: Handle + R2 + controls + actions */}
+          <div className="font-body mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground leading-none">
+            {channel.customUrl && (
+              <span className="truncate max-w-[80px]">{channel.customUrl}</span>
+            )}
+            <span>·</span>
+            {/* Priority — click to edit */}
+            {editingPriority ? (
+              <span className="inline-flex items-center gap-1">
+                <StarRating
+                  value={channel.priority}
+                  onChange={(v) => {
+                    onPriorityChange(curatedId, v);
+                    setEditingPriority(false);
+                  }}
+                  size={11}
+                />
+                <button
+                  onClick={() => setEditingPriority(false)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ) : (
+              <button
+                onClick={() => setEditingPriority(true)}
+                className="inline-flex items-center gap-0.5 text-amber-400 hover:text-amber-300 transition-colors"
+                title="Edit priority"
+              >
+                <Star className="h-3 w-3 fill-current" />
+              </button>
+            )}
+            <span>·</span>
+            <span className={uploadedCount > 0 ? "text-emerald-500" : ""}>{uploadedCount} r2</span>
+            {onDateRangeChange && (
+              <>
+                <span>·</span>
+                <select
+                  value={dateRangeOverride ?? ""}
+                  onChange={(e) => onDateRangeChange(curatedId, e.target.value || null)}
+                  className="h-4 rounded border border-border bg-transparent px-0.5 text-[11px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  title="Download date range"
+                >
+                  {DATE_RANGE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </>
+            )}
+            {onMinDurationChange && (
+              <MinDurationInput
+                curatedId={curatedId}
+                value={minDurationOverride}
+                onChange={onMinDurationChange}
+              />
+            )}
+            {/* Actions — hidden until row hover */}
             <div className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/ch:opacity-100">
               <MoveToGroupDropdown
                 curatedId={curatedId}
@@ -1583,74 +1633,6 @@ function ChannelRow({
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
-          </div>
-
-          {/* Line 2: Handle + stats + date range */}
-          <div className="font-body mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground leading-none">
-            {channel.customUrl && (
-              <>
-                <span className="truncate max-w-[100px]">{channel.customUrl}</span>
-                <span>·</span>
-              </>
-            )}
-            {/* Priority — click to edit */}
-            {editingPriority ? (
-              <span className="inline-flex items-center gap-1">
-                <StarRating
-                  value={channel.priority}
-                  onChange={(v) => {
-                    onPriorityChange(curatedId, v);
-                    setEditingPriority(false);
-                  }}
-                  size={11}
-                />
-                <button
-                  onClick={() => setEditingPriority(false)}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ) : (
-              <button
-                onClick={() => setEditingPriority(true)}
-                className="inline-flex items-center gap-0.5 text-amber-400 hover:text-amber-300 transition-colors"
-                title="Edit priority"
-              >
-                <Star className="h-3 w-3 fill-current" />
-                <span>{priorityStars}</span>
-              </button>
-            )}
-            <span>·</span>
-            <span>{formatCount(channel.subscriberCount)} subs</span>
-            <span>·</span>
-            <span>{formatCount(channel.videoCount)} vids</span>
-            <span>·</span>
-            <span>{downloadedCount} dl</span>
-            <span>·</span>
-            <span>{uploadedCount} r2</span>
-            {onDateRangeChange && (
-              <>
-                <span>·</span>
-                <select
-                  value={dateRangeOverride ?? ""}
-                  onChange={(e) => onDateRangeChange(curatedId, e.target.value || null)}
-                  className="h-4 rounded border border-border bg-transparent px-0.5 text-[11px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                  title="Download date range"
-                >
-                  {DATE_RANGE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </>
-            )}
-            {onMinDurationChange && (
-              <MinDurationInput
-                curatedId={curatedId}
-                value={minDurationOverride}
-                onChange={onMinDurationChange}
-              />
-            )}
           </div>
         </div>
       </div>

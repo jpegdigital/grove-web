@@ -217,9 +217,13 @@ body {
    This is the parent's tool, not the kid's playground. */
 
 .admin-root {
-  background: var(--background);
+  background: var(--muted);
   position: relative;
   overflow: hidden;
+}
+
+.dark .admin-root {
+  background: color-mix(in srgb, var(--background) 85%, black);
 }
 
 /* Subtle grain texture overlay */
@@ -236,14 +240,14 @@ body {
 
 /* ─── Admin header ─── */
 .admin-header {
-  background: var(--card);
+  background: var(--background);
   border-bottom: 1px solid var(--border);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
 .dark .admin-header {
-  background: color-mix(in srgb, var(--card) 70%, var(--background));
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  background: var(--card);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
 }
 
 /* ─── V2: Two-panel layout ─── */
@@ -287,38 +291,38 @@ body {
 
 /* ─── Group sections (vertical list) ─── */
 .admin-group-section {
-  background: var(--card);
+  background: var(--background);
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   overflow: visible;
   transition: all 0.15s ease;
   position: relative;
   min-width: 0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
 }
 
 .admin-group-section:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
   border-color: color-mix(in srgb, var(--foreground) 12%, var(--border));
 }
 
 .dark .admin-group-section {
-  background: color-mix(in srgb, var(--card) 80%, var(--background));
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  background: var(--card);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 
 .dark .admin-group-section:hover {
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }
 
 .admin-group-ungrouped {
   border-style: dashed;
-  background: color-mix(in srgb, var(--muted) 60%, var(--card));
+  background: color-mix(in srgb, var(--muted) 60%, var(--background));
   box-shadow: none;
 }
 
 .dark .admin-group-ungrouped {
-  background: color-mix(in srgb, var(--card) 50%, var(--background));
+  background: color-mix(in srgb, var(--card) 60%, var(--background));
 }
 
 /* Group header row */
@@ -380,13 +384,13 @@ body {
 .admin-tile-cover-fade {
   position: absolute;
   inset: 0;
-  background: linear-gradient(to top, var(--card) 5%, transparent 100%);
+  background: linear-gradient(to top, var(--background) 5%, transparent 100%);
 }
 
 .dark .admin-tile-cover-fade {
   background: linear-gradient(
     to top,
-    color-mix(in srgb, var(--card) 80%, var(--background)) 5%,
+    var(--card) 5%,
     transparent 100%
   );
 }

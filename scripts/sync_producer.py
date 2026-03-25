@@ -201,6 +201,7 @@ def parse_date_range(override_str: str | None) -> datetime:
     """Convert date range string to a UTC datetime cutoff (start of day, inclusive).
 
     Supported formats:
+        "all" (no date filtering)
         "today-6months", "today-2years", "today-1years" (relative)
         "19700101" (absolute date, YYYYMMDD)
         None → uses default_date_range from config
@@ -209,6 +210,10 @@ def parse_date_range(override_str: str | None) -> datetime:
         override_str = CFG["producer"]["default_date_range"]
 
     now = datetime.now(timezone.utc)
+
+    # "all" means no date filtering — use epoch as cutoff
+    if override_str.lower() == "all":
+        return datetime(1970, 1, 1, tzinfo=timezone.utc)
 
     # Absolute date format: YYYYMMDD
     if re.match(r"^\d{8}$", override_str):
