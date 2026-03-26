@@ -10,6 +10,7 @@ interface CuratedChannelRow {
 	creator_id: string | null;
 	date_range_override: string | null;
 	min_duration_override: number | null;
+	max_videos_override: number | null;
 	channels: {
 		youtube_id: string;
 		title: string;
@@ -49,7 +50,7 @@ export async function fetchCreatorsWithChannels(): Promise<CreatorsWithChannelsR
 			.select(
 				`id, name, slug, avatar_channel_id, cover_channel_id, display_order, priority, created_at,
          curated_channels(
-           id, channel_id, display_order, priority, creator_id, date_range_override, min_duration_override,
+           id, channel_id, display_order, priority, creator_id, date_range_override, min_duration_override, max_videos_override,
            channels(youtube_id, title, description, custom_url, thumbnail_url, banner_url, subscriber_count, video_count, view_count)
          )`,
 			)
@@ -57,7 +58,7 @@ export async function fetchCreatorsWithChannels(): Promise<CreatorsWithChannelsR
 		supabase
 			.from("curated_channels")
 			.select(
-				`id, channel_id, display_order, priority, creator_id, date_range_override, min_duration_override,
+				`id, channel_id, display_order, priority, creator_id, date_range_override, min_duration_override, max_videos_override,
          channels(youtube_id, title, description, custom_url, thumbnail_url, banner_url, subscriber_count, video_count, view_count)`,
 			)
 			.is("creator_id", null)

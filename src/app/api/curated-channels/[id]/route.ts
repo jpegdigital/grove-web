@@ -42,6 +42,21 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         updates.min_duration_override = d;
       }
     }
+    if ("max_videos_override" in body) {
+      const raw = body.max_videos_override;
+      if (raw === null || raw === "" || raw === undefined) {
+        updates.max_videos_override = null;
+      } else {
+        const v = Number(raw);
+        if (!Number.isInteger(v) || v < 1) {
+          return NextResponse.json(
+            { error: "max_videos_override must be a positive integer" },
+            { status: 400 }
+          );
+        }
+        updates.max_videos_override = v;
+      }
+    }
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json(

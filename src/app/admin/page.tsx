@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useMountEffect } from "@/hooks/use-mount-effect";
 import { createPortal } from "react-dom";
 import Image from "next/image";
@@ -24,8 +24,6 @@ import {
   Loader2,
   Sun,
   Moon,
-  ArrowUp,
-  ArrowDown,
   FolderPlus,
   X,
   ImageIcon,
@@ -35,8 +33,6 @@ import {
   Check,
   PanelRightClose,
   PanelRightOpen,
-  LayoutGrid,
-  LayoutList,
   CloudUpload,
   Star,
 } from "lucide-react";
@@ -67,6 +63,7 @@ interface CuratedChannelRow {
   creator_id: string | null;
   date_range_override: string | null;
   min_duration_override: number | null;
+  max_videos_override: number | null;
   channels: {
     youtube_id: string;
     title: string;
@@ -98,18 +95,8 @@ interface CreatorsResponse {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const ACCENT_COLORS = [
-  "var(--coral)",
-  "var(--teal)",
-  "var(--sky)",
-  "var(--lavender)",
-  "var(--sunflower)",
-  "var(--mint)",
-  "var(--peach)",
-];
-
-function formatCount(count: string): string {
-  const num = parseInt(count, 10);
+function formatCount(count: string | number): string {
+  const num = typeof count === "number" ? count : parseInt(String(count), 10);
   if (isNaN(num)) return "0";
   if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
   if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
@@ -242,7 +229,6 @@ export default function AdminPage() {
   const [isSearching, setIsSearching] = useState(false);
   const [mode, setMode] = useState<"lookup" | "search">("lookup");
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [viewMode, setViewMode] = useState<"list" | "grid">("grid");
 
   // Creator state
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -250,6 +236,7 @@ export default function AdminPage() {
   const [isCreatingCreator, setIsCreatingCreator] = useState(false);
   const [editingAvatar, setEditingAvatar] = useState<string | null>(null);
   const createInputRef = useRef<HTMLInputElement>(null);
+
 
   const { data: curatedChannels = [], isLoading: isHydrating } = useQuery({
     queryKey: ["curated-channels"],
@@ -273,6 +260,7 @@ export default function AdminPage() {
 
   const creators = creatorsData?.creators || [];
   const ungroupedChannels = creatorsData?.ungrouped || [];
+
 
   const toggleCreateForm = useCallback(() => {
     setShowCreateForm((prev) => {
@@ -391,40 +379,6 @@ export default function AdminPage() {
       toast("Channel removed");
     },
     [queryClient]
-  );
-
-  const moveChannel = useCallback(
-    async (channelId: string, direction: "up" | "down") => {
-      const idx = curatedChannels.findIndex((c) => c.id === channelId);
-      if (idx === -1) return;
-      const swapIdx = direction === "up" ? idx - 1 : idx + 1;
-      if (swapIdx < 0 || swapIdx >= curatedChannels.length) return;
-
-      queryClient.setQueryData<Channel[]>(["curated-channels"], (old = []) => {
-        const newList = [...old];
-        [newList[idx], newList[swapIdx]] = [newList[swapIdx], newList[idx]];
-        return newList;
-      });
-
-      const updates = [
-        supabase
-          .from("curated_channels")
-          .update({ display_order: swapIdx })
-          .eq("channel_id", curatedChannels[idx].id),
-        supabase
-          .from("curated_channels")
-          .update({ display_order: idx })
-          .eq("channel_id", curatedChannels[swapIdx].id),
-      ];
-
-      const results = await Promise.all(updates);
-      const failed = results.find((r) => r.error);
-      if (failed?.error) {
-        console.error("Failed to update order:", failed.error);
-        toast.error("Failed to reorder");
-      }
-    },
-    [curatedChannels, queryClient]
   );
 
   // ─── Creator CRUD ─────────────────────────────────────────────────────────
@@ -594,6 +548,27 @@ export default function AdminPage() {
     [queryClient]
   );
 
+  const updateMaxVideos = useCallback(
+    async (curatedId: string, maxVideos: number | null) => {
+      try {
+        const res = await fetch(`/api/curated-channels/${curatedId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ max_videos_override: maxVideos }),
+        });
+        if (!res.ok) {
+          toast.error("Failed to update max videos");
+          return;
+        }
+        queryClient.invalidateQueries({ queryKey: ["creators"] });
+        toast.success(maxVideos ? `Max videos: ${maxVideos}` : "Max videos: default (10)");
+      } catch {
+        toast.error("Failed to update max videos");
+      }
+    },
+    [queryClient]
+  );
+
   const updateCreatorPriority = useCallback(
     async (creatorId: string, priority: number) => {
       try {
@@ -641,38 +616,9 @@ export default function AdminPage() {
     [queryClient]
   );
 
-  const moveCreator = useCallback(
-    async (creatorId: string, direction: "up" | "down") => {
-      const idx = creators.findIndex((c) => c.id === creatorId);
-      if (idx === -1) return;
-      const swapIdx = direction === "up" ? idx - 1 : idx + 1;
-      if (swapIdx < 0 || swapIdx >= creators.length) return;
-
-      try {
-        await Promise.all([
-          fetch(`/api/creators/${creators[idx].id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ display_order: swapIdx }),
-          }),
-          fetch(`/api/creators/${creators[swapIdx].id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ display_order: idx }),
-          }),
-        ]);
-
-        queryClient.invalidateQueries({ queryKey: ["creators"] });
-      } catch {
-        toast.error("Failed to reorder");
-      }
-    },
-    [creators, queryClient]
-  );
-
   const isCurated = (id: string) => curatedChannels.some((c) => c.id === id);
 
-  // ─── Get avatar/cover for a creator ──────────────────────────────────────
+  // ─── Get avatar for a creator ──────────────────────────────────────
 
   function getCreatorAvatar(creator: Creator): string | null {
     if (creator.avatar_channel_id) {
@@ -686,20 +632,6 @@ export default function AdminPage() {
     }
     return null;
   }
-
-  function getCreatorCover(creator: Creator): string | null {
-    if (creator.cover_channel_id) {
-      const ch = creator.curated_channels.find(
-        (c) => c.channel_id === creator.cover_channel_id
-      );
-      if (ch?.channels?.banner_url) return ch.channels.banner_url;
-    }
-    if (creator.curated_channels.length > 0) {
-      return creator.curated_channels[0].channels?.banner_url || null;
-    }
-    return null;
-  }
-
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -769,55 +701,28 @@ export default function AdminPage() {
         </div>
       </header>
 
-      {/* Two-panel layout: Main (groups) | Sidebar (search) */}
+      {/* Two-panel layout: Main (tree table) | Sidebar (search) */}
       <div className="admin-layout-v2 relative z-10">
-        {/* ── LEFT: Main content — Groups & Channels ── */}
+        {/* ── LEFT: Main content — Tree Table ── */}
         <main className="admin-main-v2">
-          <div className="px-6 pt-5 pb-8 lg:px-10">
-            {/* Main header with actions */}
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="font-body text-xl font-bold tracking-tight text-foreground">
+          <div className="px-4 pt-4 pb-8 lg:px-6">
+            {/* Toolbar */}
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="font-body text-lg font-bold tracking-tight text-foreground">
                 Groups
               </h2>
-              <div className="flex items-center gap-2.5">
-                {/* View toggle */}
-                <div className="admin-segmented-toggle inline-flex rounded-lg p-0.5">
-                  <button
-                    onClick={() => setViewMode("grid")}
-                    className={`admin-segment rounded-md p-2 transition-all ${
-                      viewMode === "grid"
-                        ? "active"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                    title="Grid view"
-                  >
-                    <LayoutGrid className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={() => setViewMode("list")}
-                    className={`admin-segment rounded-md p-2 transition-all ${
-                      viewMode === "list"
-                        ? "active"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                    title="List view"
-                  >
-                    <LayoutList className="h-4 w-4" />
-                  </button>
-                </div>
-                <button
-                  onClick={toggleCreateForm}
-                  className="admin-button font-body flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold transition-all"
-                >
-                  <Plus className="h-4 w-4" />
-                  New group
-                </button>
-              </div>
+              <button
+                onClick={toggleCreateForm}
+                className="admin-button font-body flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-all"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                New group
+              </button>
             </div>
 
-            {/* Create group form — inline at top */}
+            {/* Create group form */}
             {showCreateForm && (
-              <div className="mb-5 animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="mb-3 animate-in fade-in slide-in-from-top-2 duration-200">
                 <div className="creator-group-form flex items-center gap-2.5 rounded-xl p-3">
                   <Input
                     ref={createInputRef}
@@ -878,250 +783,147 @@ export default function AdminPage() {
                 </p>
               </div>
             ) : (
-              <div className={viewMode === "grid" ? "admin-groups-grid" : "admin-groups-list space-y-3"}>
-                {/* ─── Creator group sections ─── */}
-                {creators.map((creator, creatorIdx) => {
-                  const accent =
-                    ACCENT_COLORS[creatorIdx % ACCENT_COLORS.length];
+              /* ─── Tree Table ─── */
+              <div className="tt-container">
+                {/* Creator groups */}
+                {creators.map((creator, i) => {
+                  // groups always expanded — no collapse
                   const avatar = getCreatorAvatar(creator);
-                  const cover = getCreatorCover(creator);
                   const channelCount = creator.curated_channels.length;
-                  const groupR2 = creator.curated_channels.reduce((s, cc) => s + (videoCounts.get(cc.channel_id)?.uploaded ?? 0), 0);
+                  const groupR2 = creator.curated_channels.reduce(
+                    (s, cc) => s + (videoCounts.get(cc.channel_id)?.uploaded ?? 0),
+                    0
+                  );
 
                   return (
-                    <div
-                      key={creator.id}
-                      className="admin-group-section group/creator"
-                    >
-                      {/* Cover banner — grid mode only */}
-                      {viewMode === "grid" && cover && (
-                        <div className="admin-tile-cover">
-                          <Image
-                            src={cover}
-                            alt=""
-                            fill
-                            className="object-cover opacity-40"
-                            sizes="600px"
-                          />
-                          <div className="admin-tile-cover-fade" />
+                    <div key={creator.id} className={`tt-group tt-accent-${i % 6}`}>
+                      {/* Group header */}
+                      <div className="tt-group-header">
+                        <button
+                          onClick={() => setEditingAvatar(editingAvatar === creator.id ? null : creator.id)}
+                          className="tt-avatar"
+                          title="Change avatar"
+                        >
+                          {avatar ? (
+                            <Image src={avatar} alt={creator.name} fill className="object-cover" sizes="42px" />
+                          ) : (
+                            <span className="flex h-full w-full items-center justify-center bg-secondary text-xs font-bold text-muted-foreground">
+                              {creator.name.charAt(0)}
+                            </span>
+                          )}
+                          <span className="tt-avatar-overlay">
+                            <ImageIcon className="h-3 w-3 text-white" />
+                          </span>
+                        </button>
+                        <div className="tt-group-info">
+                          <span className="tt-group-name">{creator.name}</span>
+                          <span className="tt-group-meta">
+                            {channelCount} channel{channelCount !== 1 && "s"}
+                            {groupR2 > 0 && <>&nbsp;&middot;&nbsp;{groupR2} synced</>}
+                          </span>
                         </div>
-                      )}
-                      {viewMode === "grid" && !cover && (
-                        <div
-                          className="h-1 w-full rounded-t-xl"
-                          style={{
-                            background: `linear-gradient(135deg, color-mix(in srgb, ${accent} 20%, transparent), color-mix(in srgb, ${accent} 5%, transparent))`,
-                          }}
-                        />
-                      )}
-
-                      {/* Group header row — always visible */}
-                      <div className="admin-group-header">
-                        <div className="flex items-center gap-3">
-                          {/* Avatar */}
+                        <div className="tt-group-controls">
+                          <StarRating
+                            value={creator.priority}
+                            onChange={(v) => updateCreatorPriority(creator.id, v)}
+                            size={14}
+                          />
                           <button
-                            onClick={() =>
-                              setEditingAvatar(
-                                editingAvatar === creator.id
-                                  ? null
-                                  : creator.id
-                              )
-                            }
-                            className={`group/avatar relative flex-shrink-0 overflow-hidden rounded-full ring-2 ring-border transition-all hover:ring-foreground/25 ${viewMode === "grid" ? "h-11 w-11" : "h-10 w-10"}`}
-                            title="Change avatar source"
+                            onClick={() => deleteCreator(creator.id, creator.name)}
+                            className="tt-action-btn tt-action-danger"
+                            title="Delete group"
                           >
-                            {avatar ? (
-                              <Image
-                                src={avatar}
-                                alt={creator.name}
-                                fill
-                                className="object-cover"
-                                sizes={viewMode === "grid" ? "44px" : "40px"}
-                              />
-                            ) : (
-                              <div
-                                className="flex h-full w-full items-center justify-center text-sm font-bold text-white"
-                                style={{ background: accent }}
-                              >
-                                {creator.name.charAt(0)}
-                              </div>
-                            )}
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100">
-                              <ImageIcon className="h-3.5 w-3.5 text-white" />
-                            </div>
+                            <Trash2 className="h-3.5 w-3.5" />
                           </button>
-
-                          {/* Name + count */}
-                          <div className="min-w-0 flex-1">
-                            <h3 className={`font-body truncate font-semibold text-foreground ${viewMode === "grid" ? "text-base" : "text-[15px]"}`}>
-                              {creator.name}
-                            </h3>
-                            <div className="font-body flex items-center gap-2 text-xs text-muted-foreground">
-                              <StarRating
-                                value={creator.priority}
-                                onChange={(v) => updateCreatorPriority(creator.id, v)}
-                                size={12}
-                              />
-                              <span>{channelCount} ch</span>
-                              <span>·</span>
-                              <span>{groupR2} r2</span>
-                            </div>
-                          </div>
-
-                          {/* Group-level actions */}
-                          <div className="flex items-center gap-0.5">
-                            {viewMode === "list" && (
-                              <>
-                                <button
-                                  onClick={() => moveCreator(creator.id, "up")}
-                                  disabled={creatorIdx === 0}
-                                  className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-20"
-                                  title="Move up"
-                                >
-                                  <ArrowUp className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  onClick={() => moveCreator(creator.id, "down")}
-                                  disabled={creatorIdx === creators.length - 1}
-                                  className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-20"
-                                  title="Move down"
-                                >
-                                  <ArrowDown className="h-3.5 w-3.5" />
-                                </button>
-                              </>
-                            )}
-                            <button
-                              onClick={() =>
-                                deleteCreator(creator.id, creator.name)
-                              }
-                              className="rounded p-1.5 text-muted-foreground opacity-0 transition-all group-hover/creator:opacity-100 hover:bg-destructive/10 hover:text-destructive"
-                              title="Delete group"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
                         </div>
                       </div>
 
-                      {/* Avatar picker */}
-                      {editingAvatar === creator.id &&
-                        creator.curated_channels.length > 0 && (
-                          <div className="border-b border-border bg-muted/30 px-5 py-3">
-                            <p className="font-body mb-2 text-[11px] tracking-wider text-muted-foreground uppercase">
-                              Choose avatar source
-                            </p>
-                            <div className="flex flex-wrap gap-2">
-                              {creator.curated_channels.map((cc) => (
-                                <button
-                                  key={cc.id}
-                                  onClick={() =>
-                                    updateCreatorAvatar(
-                                      creator.id,
-                                      cc.channel_id
-                                    )
-                                  }
-                                  className={`relative h-9 w-9 overflow-hidden rounded-full ring-2 transition-all hover:scale-110 ${
-                                    cc.channel_id ===
-                                    creator.avatar_channel_id
-                                      ? "ring-primary"
-                                      : "ring-border hover:ring-foreground/25"
-                                  }`}
-                                  title={cc.channels?.title}
-                                >
-                                  {cc.channels?.thumbnail_url && (
-                                    <Image
-                                      src={cc.channels.thumbnail_url}
-                                      alt={cc.channels.title}
-                                      fill
-                                      className="object-cover"
-                                      sizes="36px"
-                                    />
-                                  )}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+                      {/* Avatar picker row */}
+                      {editingAvatar === creator.id && creator.curated_channels.length > 0 && (
+                        <div className="tt-avatar-picker">
+                          <span className="font-body text-[11px] tracking-wider text-muted-foreground uppercase">
+                            Avatar:
+                          </span>
+                          {creator.curated_channels.map((cc) => (
+                            <button
+                              key={cc.id}
+                              onClick={() => updateCreatorAvatar(creator.id, cc.channel_id)}
+                              className={`tt-avatar-option ${
+                                cc.channel_id === creator.avatar_channel_id ? "tt-avatar-option-active" : ""
+                              }`}
+                              title={cc.channels?.title}
+                            >
+                              {cc.channels?.thumbnail_url && (
+                                <Image
+                                  src={cc.channels.thumbnail_url}
+                                  alt={cc.channels.title}
+                                  fill
+                                  className="object-cover"
+                                  sizes="32px"
+                                />
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
 
-                      {/* Channel list */}
-                      <div className="admin-group-channels">
+                      {/* Channel child rows */}
+                      <div className="tt-channels">
                           {creator.curated_channels.length === 0 ? (
-                            <p className="font-body py-5 text-center text-sm text-muted-foreground">
-                              No channels — search and add some!
-                            </p>
-                          ) : (
-                            <div>
-                              {creator.curated_channels.map((cc) => {
-                                const ch = rowToChannel(cc);
-                                return (
-                                  <ChannelRow
-                                    key={cc.id}
-                                    channel={ch}
-                                    curatedId={cc.id}
-                                    onRemove={removeChannel}
-                                    creators={creators}
-                                    onAssign={assignChannelToCreator}
-                                    showUngroup
-                                    onPriorityChange={updateChannelPriority}
-                                    uploadedCount={videoCounts.get(cc.channel_id)?.uploaded}
-                                    dateRangeOverride={cc.date_range_override}
-                                    onDateRangeChange={updateDateRange}
-                                    minDurationOverride={cc.min_duration_override}
-                                    onMinDurationChange={updateMinDuration}
-                                  />
-                                );
-                              })}
+                            <div className="tt-channel-empty">
+                              <span className="font-body text-sm text-muted-foreground">
+                                No channels — search and add some
+                              </span>
                             </div>
+                          ) : (
+                            creator.curated_channels.map((cc) => (
+                              <ChannelTreeRow
+                                key={cc.id}
+                                cc={cc}
+                                videoCounts={videoCounts}
+                                onRemove={removeChannel}
+                                creators={creators}
+                                onAssign={assignChannelToCreator}
+                                onPriorityChange={updateChannelPriority}
+                                onDateRangeChange={updateDateRange}
+                                onMinDurationChange={updateMinDuration}
+                                onMaxVideosChange={updateMaxVideos}
+                              />
+                            ))
                           )}
                         </div>
                     </div>
                   );
                 })}
 
-                {/* ─── Ungrouped channels section ─── */}
+                {/* Ungrouped section */}
                 {ungroupedChannels.length > 0 && (
-                  <div className="admin-group-section admin-group-ungrouped">
-                    <div className="admin-group-header">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-4 w-4 items-center justify-center">
-                          <Ungroup className="h-4 w-4 text-muted-foreground" />
-                        </div>
-                        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-muted ring-2 ring-border">
-                          <Ungroup className="h-4 w-4 text-muted-foreground" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-baseline gap-2">
-                            <h3 className="font-body text-[15px] font-semibold text-muted-foreground">
-                              Ungrouped
-                            </h3>
-                            <span className="font-body text-xs text-muted-foreground">
-                              {ungroupedChannels.length} ch — assign to a group
-                            </span>
-                          </div>
-                        </div>
+                  <div className="tt-group tt-group-ungrouped">
+                    <div className="tt-group-header">
+                      <span className="tt-ungrouped-icon">
+                        <Ungroup className="h-4 w-4 text-muted-foreground" />
+                      </span>
+                      <div className="tt-group-info">
+                        <span className="tt-group-name text-muted-foreground">Ungrouped</span>
+                        <span className="tt-group-meta">{ungroupedChannels.length} channel{ungroupedChannels.length !== 1 && "s"}</span>
                       </div>
                     </div>
-                    <div className="admin-group-channels">
-                      {ungroupedChannels.map((cc) => {
-                        const ch = rowToChannel(cc);
-                        return (
-                          <ChannelRow
-                            key={cc.id}
-                            channel={ch}
-                            curatedId={cc.id}
-                            onRemove={removeChannel}
-                            creators={creators}
-                            onAssign={assignChannelToCreator}
-                            showUngroup={false}
-                            onPriorityChange={updateChannelPriority}
-                            uploadedCount={videoCounts.get(cc.channel_id)?.uploaded}
-                            dateRangeOverride={cc.date_range_override}
-                            onDateRangeChange={updateDateRange}
-                            minDurationOverride={cc.min_duration_override}
-                            onMinDurationChange={updateMinDuration}
-                          />
-                        );
-                      })}
+
+                    <div className="tt-channels">
+                      {ungroupedChannels.map((cc) => (
+                        <ChannelTreeRow
+                          key={cc.id}
+                          cc={cc}
+                          videoCounts={videoCounts}
+                          onRemove={removeChannel}
+                          creators={creators}
+                          onAssign={assignChannelToCreator}
+                          onPriorityChange={updateChannelPriority}
+                          onDateRangeChange={updateDateRange}
+                          onMinDurationChange={updateMinDuration}
+                          onMaxVideosChange={updateMaxVideos}
+                        />
+                      ))}
                     </div>
                   </div>
                 )}
@@ -1130,7 +932,7 @@ export default function AdminPage() {
                 {creators.length > 0 &&
                   ungroupedChannels.length === 0 &&
                   curatedChannels.length > 0 && (
-                    <div className="font-body py-3 text-center text-sm text-muted-foreground">
+                    <div className="font-body py-3 text-center text-xs text-muted-foreground">
                       All channels are grouped
                     </div>
                   )}
@@ -1144,7 +946,6 @@ export default function AdminPage() {
           className={`admin-search-sidebar transition-all duration-200 ${sidebarOpen ? "" : "admin-search-sidebar-hidden"}`}
         >
           <div className="sticky top-0">
-            {/* Sidebar header */}
             <div className="flex items-center justify-between px-4 pt-4 pb-2">
               <h2 className="font-body text-sm font-semibold text-foreground">
                 Add channels
@@ -1154,7 +955,6 @@ export default function AdminPage() {
               </p>
             </div>
 
-            {/* Mode toggle */}
             <div className="px-4 pb-2.5">
               <div className="admin-segmented-toggle inline-flex w-full rounded-lg p-0.5">
                 <button
@@ -1180,7 +980,6 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* Search input */}
             <div className="flex gap-2 px-4 pb-4">
               <div className="relative flex-1">
                 <Search className="absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -1211,10 +1010,8 @@ export default function AdminPage() {
               </Button>
             </div>
 
-            {/* Search results */}
             <ScrollArea className="admin-search-results">
               <div className="space-y-2 px-4 pb-4">
-                {/* Lookup result */}
                 {lookupResult && (
                   <div className="animate-in fade-in slide-in-from-top-2 duration-200">
                     <SearchResultCard
@@ -1225,7 +1022,6 @@ export default function AdminPage() {
                   </div>
                 )}
 
-                {/* Search results */}
                 {searchResults.map((channel, i) => (
                   <div
                     key={channel.id}
@@ -1240,7 +1036,6 @@ export default function AdminPage() {
                   </div>
                 ))}
 
-                {/* Empty state */}
                 {!lookupResult &&
                   searchResults.length === 0 &&
                   !isLoading &&
@@ -1267,7 +1062,15 @@ export default function AdminPage() {
 
 // ─── Sub-Components ──────────────────────────────────────────────────────────
 
-/** Dismiss listeners — mounted only when dropdown is open (Rule 4: useMountEffect) */
+const DATE_RANGE_OPTIONS = [
+  { value: "", label: "6mo" },
+  { value: "today-1years", label: "1y" },
+  { value: "today-2years", label: "2y" },
+  { value: "today-5years", label: "5y" },
+  { value: "all", label: "All" },
+];
+
+/** Dismiss listeners — mounted only when dropdown is open */
 function DropdownDismissListeners({
   dropdownRef,
   buttonRef,
@@ -1307,34 +1110,25 @@ function DropdownDismissListeners({
   return null;
 }
 
-/** Inline move-to-group dropdown — replaces the broken native select */
+/** Move-to-group dropdown */
 function MoveToGroupDropdown({
   curatedId,
   currentCreatorId,
   channelTitle,
   creators,
   onAssign,
-  showUngroup,
 }: {
   curatedId: string;
   currentCreatorId: string | null;
   channelTitle: string;
   creators: Creator[];
-  onAssign: (
-    curatedId: string,
-    creatorId: string | null,
-    title: string
-  ) => void;
-  showUngroup: boolean;
+  onAssign: (curatedId: string, creatorId: string | null, title: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number; flipUp: boolean }>({ top: 0, left: 0, flipUp: false });
   const dropdownRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
-  // Listeners are mounted via DropdownDismissListeners below (only when open)
-
-  // Calculate position and open
   const handleOpen = () => {
     if (!open && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
@@ -1354,7 +1148,7 @@ function MoveToGroupDropdown({
       <button
         ref={buttonRef}
         onClick={handleOpen}
-        className="admin-move-btn rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+        className="tt-action-btn"
         title="Reassign to group"
       >
         <FolderInput className="h-3.5 w-3.5" />
@@ -1376,48 +1170,30 @@ function MoveToGroupDropdown({
             <p className="font-body px-2.5 py-1.5 text-[10px] tracking-wider text-muted-foreground uppercase">
               Move to
             </p>
-            {/* Ungroup option */}
             <button
-              onClick={() => {
-                onAssign(curatedId, null, channelTitle);
-                setOpen(false);
-              }}
+              onClick={() => { onAssign(curatedId, null, channelTitle); setOpen(false); }}
               className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left font-body text-sm transition-colors hover:bg-secondary ${
-                currentCreatorId === null
-                  ? "text-foreground font-semibold"
-                  : "text-foreground"
+                currentCreatorId === null ? "text-foreground font-semibold" : "text-foreground"
               }`}
             >
               <Ungroup className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
               <span className="truncate">Ungrouped</span>
-              {currentCreatorId === null && (
-                <Check className="ml-auto h-3.5 w-3.5 flex-shrink-0 text-primary" />
-              )}
+              {currentCreatorId === null && <Check className="ml-auto h-3.5 w-3.5 flex-shrink-0 text-primary" />}
             </button>
 
-            {creators.length > 0 && (
-              <div className="my-1 border-t border-border" />
-            )}
+            {creators.length > 0 && <div className="my-1 border-t border-border" />}
 
-            {/* Creator options (sorted alphabetically via sort_name) */}
             {creators.map((creator) => (
               <button
                 key={creator.id}
-                onClick={() => {
-                  onAssign(curatedId, creator.id, channelTitle);
-                  setOpen(false);
-                }}
+                onClick={() => { onAssign(curatedId, creator.id, channelTitle); setOpen(false); }}
                 className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left font-body text-sm transition-colors hover:bg-secondary ${
-                  currentCreatorId === creator.id
-                    ? "text-foreground font-semibold"
-                    : "text-foreground"
+                  currentCreatorId === creator.id ? "text-foreground font-semibold" : "text-foreground"
                 }`}
               >
                 <FolderPlus className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
                 <span className="truncate">{creator.name}</span>
-                {currentCreatorId === creator.id && (
-                  <Check className="ml-auto h-3.5 w-3.5 flex-shrink-0 text-primary" />
-                )}
+                {currentCreatorId === creator.id && <Check className="ml-auto h-3.5 w-3.5 flex-shrink-0 text-primary" />}
               </button>
             ))}
           </div>
@@ -1428,7 +1204,7 @@ function MoveToGroupDropdown({
   );
 }
 
-/** Local-state input that saves on blur or Enter — no flicker while typing */
+/** Local-state input that saves on blur or Enter */
 function MinDurationInput({
   curatedId,
   value,
@@ -1439,9 +1215,7 @@ function MinDurationInput({
   onChange: (curatedId: string, value: number | null) => void;
 }) {
   const [local, setLocal] = useState(value != null ? String(value) : "");
-  const committed = value != null ? String(value) : "";
 
-  // Sync from server when prop changes (e.g. after refetch)
   useEffect(() => {
     setLocal(value != null ? String(value) : "");
   }, [value]);
@@ -1456,184 +1230,151 @@ function MinDurationInput({
   };
 
   return (
-    <>
-      <span>·</span>
-      <input
-        type="number"
-        min={0}
-        step={60}
-        placeholder="300"
-        value={local}
-        onChange={(e) => setLocal(e.target.value)}
-        onBlur={save}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.currentTarget.blur();
-          }
-        }}
-        className="h-4 w-12 rounded border border-border bg-transparent px-0.5 text-center text-[11px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-        title="Min duration (seconds) — empty = default (300s)"
-      />
-      <span className="text-[10px] text-muted-foreground/60">s</span>
-    </>
+    <input
+      type="number"
+      min={0}
+      step={60}
+      placeholder="300"
+      value={local}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={save}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+      }}
+      className="tt-meta-input [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+      title="Min duration (seconds) — empty = default (300s)"
+    />
   );
 }
 
-/** Compact channel row for inside group sections */
-const DATE_RANGE_OPTIONS = [
-  { value: "", label: "6mo" },
-  { value: "today-1years", label: "1y" },
-  { value: "today-2years", label: "2y" },
-  { value: "today-5years", label: "5y" },
-  { value: "all", label: "All" },
-];
-
-function ChannelRow({
-  channel,
+/** Local-state input for max videos per channel */
+function MaxVideosInput({
   curatedId,
+  value,
+  onChange,
+}: {
+  curatedId: string;
+  value: number | null | undefined;
+  onChange: (curatedId: string, value: number | null) => void;
+}) {
+  const [local, setLocal] = useState(value != null ? String(value) : "");
+
+  useEffect(() => {
+    setLocal(value != null ? String(value) : "");
+  }, [value]);
+
+  const save = () => {
+    const trimmed = local.trim();
+    const next = trimmed === "" ? null : parseInt(trimmed, 10);
+    const prev = value ?? null;
+    if (next !== prev) {
+      onChange(curatedId, Number.isNaN(next) || (next !== null && next < 1) ? null : next);
+    }
+  };
+
+  return (
+    <input
+      type="number"
+      min={1}
+      step={1}
+      placeholder="10"
+      value={local}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={save}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+      }}
+      className="tt-meta-input [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+      title="Max videos — empty = default (10)"
+    />
+  );
+}
+
+/** Single channel row inside the tree table */
+function ChannelTreeRow({
+  cc,
+  videoCounts,
   onRemove,
   creators,
   onAssign,
-  showUngroup,
   onPriorityChange,
-  uploadedCount = 0,
-  dateRangeOverride,
   onDateRangeChange,
-  minDurationOverride,
   onMinDurationChange,
+  onMaxVideosChange,
 }: {
-  channel: Channel & { curatedId: string; creatorId: string | null; priority: number };
-  curatedId: string;
+  cc: CuratedChannelRow;
+  videoCounts: Map<string, VideoCounts>;
   onRemove: (channelId: string) => void;
   creators: Creator[];
-  onAssign: (
-    curatedId: string,
-    creatorId: string | null,
-    title: string
-  ) => void;
-  showUngroup: boolean;
+  onAssign: (curatedId: string, creatorId: string | null, title: string) => void;
   onPriorityChange: (curatedId: string, priority: number) => void;
-  uploadedCount?: number;
-  dateRangeOverride?: string | null;
-  onDateRangeChange?: (curatedId: string, value: string | null) => void;
-  minDurationOverride?: number | null;
-  onMinDurationChange?: (curatedId: string, value: number | null) => void;
+  onDateRangeChange: (curatedId: string, value: string | null) => void;
+  onMinDurationChange: (curatedId: string, value: number | null) => void;
+  onMaxVideosChange: (curatedId: string, value: number | null) => void;
 }) {
-  const [editingPriority, setEditingPriority] = useState(false);
+  const ch = rowToChannel(cc);
+  const uploaded = videoCounts.get(cc.channel_id)?.uploaded ?? 0;
+  const totalVids = parseInt(ch.videoCount, 10) || 0;
+
+  // Normalize legacy "19700101" (epoch) to "all" for pill matching
+  const rangeValue = cc.date_range_override === "19700101" ? "all" : (cc.date_range_override ?? "");
 
   return (
-    <div className="channel-row group/ch">
-      <div className="flex gap-2.5 px-4 py-2">
-        {/* Thumbnail */}
-        <div className="relative h-9 w-9 flex-shrink-0 self-center overflow-hidden rounded-lg ring-1 ring-border">
-          <Image
-            src={channel.thumbnailUrl}
-            alt={channel.title}
-            fill
-            className="object-cover"
-            sizes="36px"
-          />
+    <div className="tt-channel">
+      <div className="tt-ch-thumb">
+        <Image src={ch.thumbnailUrl} alt={ch.title} fill className="object-cover" sizes="36px" />
+      </div>
+      <div className="tt-ch-body">
+        <div className="tt-ch-top">
+          <span className="tt-ch-title">{ch.title}</span>
+          <div className="tt-ch-actions">
+            <MoveToGroupDropdown
+              curatedId={cc.id}
+              currentCreatorId={ch.creatorId}
+              channelTitle={ch.title}
+              creators={creators}
+              onAssign={onAssign}
+            />
+            <a
+              href={`https://www.youtube.com/${ch.customUrl}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="tt-action-btn"
+              title="Open on YouTube"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+            <button
+              onClick={() => onRemove(ch.id)}
+              className="tt-action-btn tt-action-danger"
+              title="Remove channel"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
-
-        {/* Two-line content */}
-        <div className="min-w-0 flex-1">
-          {/* Line 1: Name (clamped) + subs + vids */}
-          <div className="flex items-center gap-1.5">
-            <p className="font-body min-w-0 truncate text-sm font-medium leading-snug text-foreground">
-              {channel.title}
-            </p>
-            <div className="font-body ml-auto flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-              <span>{formatCount(channel.subscriberCount)} subs</span>
-              <span>·</span>
-              <span>{formatCount(channel.videoCount)} vids</span>
-            </div>
-          </div>
-
-          {/* Line 2: Handle + R2 + controls + actions */}
-          <div className="font-body mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground leading-none">
-            {channel.customUrl && (
-              <span className="truncate max-w-[80px]">{channel.customUrl}</span>
-            )}
-            <span>·</span>
-            {/* Priority — click to edit */}
-            {editingPriority ? (
-              <span className="inline-flex items-center gap-1">
-                <StarRating
-                  value={channel.priority}
-                  onChange={(v) => {
-                    onPriorityChange(curatedId, v);
-                    setEditingPriority(false);
-                  }}
-                  size={11}
-                />
-                <button
-                  onClick={() => setEditingPriority(false)}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ) : (
+        <div className="tt-ch-meta">
+          <StarRating value={ch.priority} onChange={(v) => onPriorityChange(cc.id, v)} size={15} />
+          <span className="tt-dot">&middot;</span>
+          <span className={`tt-sync ${uploaded > 0 ? "tt-sync-ok" : ""}`}>
+            {uploaded}<span className="tt-sync-total">/{formatCount(totalVids)}</span>
+          </span>
+          <span className="tt-dot">&middot;</span>
+          <div className="tt-range-pills">
+            {DATE_RANGE_OPTIONS.map((opt) => (
               <button
-                onClick={() => setEditingPriority(true)}
-                className="inline-flex items-center gap-0.5 text-amber-400 hover:text-amber-300 transition-colors"
-                title="Edit priority"
+                key={opt.value}
+                onClick={() => onDateRangeChange(cc.id, opt.value || null)}
+                className={`tt-range-pill ${rangeValue === opt.value ? "tt-range-pill-active" : ""}`}
               >
-                <Star className="h-3 w-3 fill-current" />
+                {opt.label}
               </button>
-            )}
-            <span>·</span>
-            <span className={uploadedCount > 0 ? "text-emerald-500" : ""}>{uploadedCount} r2</span>
-            {onDateRangeChange && (
-              <>
-                <span>·</span>
-                <select
-                  value={dateRangeOverride ?? ""}
-                  onChange={(e) => onDateRangeChange(curatedId, e.target.value || null)}
-                  className="h-4 rounded border border-border bg-transparent px-0.5 text-[11px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                  title="Download date range"
-                >
-                  {DATE_RANGE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </>
-            )}
-            {onMinDurationChange && (
-              <MinDurationInput
-                curatedId={curatedId}
-                value={minDurationOverride}
-                onChange={onMinDurationChange}
-              />
-            )}
-            {/* Actions — hidden until row hover */}
-            <div className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/ch:opacity-100">
-              <MoveToGroupDropdown
-                curatedId={curatedId}
-                currentCreatorId={channel.creatorId}
-                channelTitle={channel.title}
-                creators={creators}
-                onAssign={onAssign}
-                showUngroup={showUngroup}
-              />
-              <a
-                href={`https://www.youtube.com/${channel.customUrl}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                title="Open on YouTube"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-              <button
-                onClick={() => onRemove(channel.id)}
-                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                title="Remove channel"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
+            ))}
           </div>
+          <span className="tt-dot">&middot;</span>
+          <MinDurationInput curatedId={cc.id} value={cc.min_duration_override} onChange={onMinDurationChange} />
+          <span className="tt-dot">&middot;</span>
+          <MaxVideosInput curatedId={cc.id} value={cc.max_videos_override} onChange={onMaxVideosChange} />
         </div>
       </div>
     </div>
@@ -1653,7 +1394,6 @@ function SearchResultCard({
   return (
     <Card className="search-result-card border-0 p-0">
       <div className="flex items-center gap-3 p-3">
-        {/* Thumbnail */}
         <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg ring-1 ring-border">
           <Image
             src={channel.thumbnailUrl}
@@ -1663,8 +1403,6 @@ function SearchResultCard({
             sizes="40px"
           />
         </div>
-
-        {/* Info */}
         <div className="min-w-0 flex-1">
           <h4 className="font-body truncate text-sm font-medium text-foreground">
             {channel.title}
@@ -1693,8 +1431,6 @@ function SearchResultCard({
             </span>
           </div>
         </div>
-
-        {/* Add button */}
         <Button
           size="sm"
           onClick={() => onAdd(channel)}

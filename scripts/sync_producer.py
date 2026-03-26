@@ -595,7 +595,7 @@ def fetch_curated_channels(client) -> list[dict]:
     """Fetch all curated channels with overrides and channel info."""
     resp = (
         client.table("curated_channels")
-        .select("id, channel_id, date_range_override, min_duration_override, last_full_refresh_at, channels(youtube_id, title, custom_url)")
+        .select("id, channel_id, date_range_override, min_duration_override, max_videos_override, last_full_refresh_at, channels(youtube_id, title, custom_url)")
         .order("display_order")
         .execute()
     )
@@ -611,6 +611,7 @@ def fetch_curated_channels(client) -> list[dict]:
             "custom_url": ch.get("custom_url", ""),
             "date_range_override": row.get("date_range_override"),
             "min_duration_override": row.get("min_duration_override"),
+            "max_videos_override": row.get("max_videos_override"),
             "last_full_refresh_at": row.get("last_full_refresh_at"),
         })
     return results
@@ -805,7 +806,7 @@ def process_channel(
     """
     channel_id = channel["channel_id"]
     title = channel.get("title", channel_id)
-    target = CFG["producer"]["max_videos_per_channel"]
+    target = channel.get("max_videos_override") or CFG["producer"]["max_videos_per_channel"]
     min_duration = channel.get("min_duration_override") or CFG["producer"]["min_duration_seconds"]
     weights = CFG["scoring"]["weights"]
     half_life = CFG["scoring"]["freshness_half_life_days"]
