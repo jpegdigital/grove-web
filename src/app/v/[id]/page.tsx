@@ -7,6 +7,7 @@ import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import Hls from "hls.js";
 import { useMountEffect } from "@/hooks/use-mount-effect";
 import { useFeed } from "@/hooks/use-feed";
+import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import Image from "next/image";
 import {
@@ -436,9 +437,96 @@ function StatPill({
 /* ─── Page Component ─── */
 
 async function fetchVideo(id: string): Promise<VideoMeta> {
-  const res = await fetch(`/api/videos/${id}`);
-  if (!res.ok) throw new Error("Video not found");
-  return res.json();
+  if (!/^[\w-]{10,12}$/.test(id)) throw new Error("Invalid video ID");
+
+  const supabase = createClient();
+  const { data: row, error } = await supabase
+    .from("videos")
+    .select(
+      `youtube_id, channel_id, title, description, thumbnail_url,
+       published_at, is_downloaded, media_path, thumbnail_path,
+       duration_seconds, like_count, comment_count, tags, categories,
+       chapters, width, height, fps, language, webpage_url, handle,
+       r2_synced_at, channels(title)`
+    )
+    .eq("youtube_id", id)
+    .not("r2_synced_at", "is", null)
+    .single();
+
+  if (error || !row || !row.media_path) throw new Error("Video not found");
+
+  const channelData = row.channels as unknown as { title: string } | null;
+  const duration = row.duration_seconds ?? 0;
+  const w = row.width ?? 0;
+  const h = row.height ?? 0;
+
+  // Resolve creator from curated_channels → creators
+  let creatorId: string | null = null;
+  let creatorName: string | null = null;
+  let creatorSlug: string | null = null;
+  if (row.channel_id) {
+    const { data: ccRow } = await supabase
+      .from("curated_channels")
+      .select("creator_id, creators(id, name, slug)")
+      .eq("channel_id", row.channel_id)
+      .limit(1)
+      .maybeSingle();
+    if (ccRow) {
+      const cr = ccRow.creators as unknown as { id: string; name: string; slug: string } | null;
+      creatorId = cr?.id ?? null;
+      creatorName = cr?.name ?? null;
+      creatorSlug = cr?.slug ?? null;
+    }
+  }
+
+  // Parse chapters from JSONB
+  let chapters: VideoMeta["chapters"] = null;
+  if (row.chapters && Array.isArray(row.chapters)) {
+    chapters = (row.chapters as { title: string; start_time: number; end_time: number }[]).map(
+      (ch) => ({ title: ch.title, startTime: ch.start_time, endTime: ch.end_time })
+    );
+  }
+
+  const formatSec = (sec: number): string => {
+    if (!sec) return "0:00";
+    const hrs = Math.floor(sec / 3600);
+    const mins = Math.floor((sec % 3600) / 60);
+    const secs = sec % 60;
+    const sPad = secs.toString().padStart(2, "0");
+    if (hrs > 0) return `${hrs}:${mins.toString().padStart(2, "0")}:${sPad}`;
+    return `${mins}:${sPad}`;
+  };
+
+  return {
+    id,
+    title: row.title ?? "Untitled",
+    description: row.description ?? "",
+    channel: channelData?.title ?? "",
+    channelId: row.channel_id ?? "",
+    handle: row.handle ?? "",
+    channelFollowers: null,
+    uploadDate: row.published_at ? row.published_at.slice(0, 10) : "",
+    duration,
+    durationFormatted: formatSec(duration),
+    viewCount: 0,
+    likeCount: Number(row.like_count) || 0,
+    commentCount: Number(row.comment_count) || 0,
+    tags: row.tags ?? [],
+    categories: row.categories ?? [],
+    chapters,
+    thumbnail: row.thumbnail_url ?? "",
+    resolution: w && h ? `${w}x${h}` : "",
+    width: w,
+    height: h,
+    fps: row.fps ?? 0,
+    language: row.language ?? null,
+    webpageUrl: row.webpage_url ?? "",
+    mediaPath: row.media_path,
+    thumbnailPath: row.thumbnail_path ?? null,
+    creatorId,
+    creatorName,
+    creatorSlug,
+  };
 }
 
 export default function VideoPage() {

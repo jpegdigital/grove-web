@@ -66,6 +66,23 @@ async function fetchFeedData(creatorSlug: string | null): Promise<{
 }> {
   const supabase = createClient();
 
+  // Step 0: Get current user's subscribed creator IDs
+  // RLS (subscriptions_select_own) ensures we only see our own rows
+  const { data: subRows, error: subErr } = await supabase
+    .from("user_subscriptions")
+    .select("creator_id");
+
+  if (subErr) throw new Error("Failed to load subscriptions");
+
+  const subscribedCreatorIds = new Set(
+    (subRows ?? []).map((r) => r.creator_id as string)
+  );
+
+  // No subscriptions → empty feed
+  if (subscribedCreatorIds.size === 0) {
+    return { videos: [], total: 0, creators: [] };
+  }
+
   // Step 1: Build channel → creator mapping from curated_channels
   const { data: curatedRows, error: curatedErr } = await supabase
     .from("curated_channels")
@@ -123,12 +140,14 @@ async function fetchFeedData(creatorSlug: string | null): Promise<{
     });
   }
 
-  // If filtering by creator slug, narrow the channel set
-  const channelIds = creatorSlug
-    ? [...channelMap.entries()]
-        .filter(([, info]) => info.creator?.slug === creatorSlug)
-        .map(([chId]) => chId)
-    : [...channelMap.keys()];
+  // Narrow to subscribed creators, then optionally by slug
+  const channelIds = [...channelMap.entries()]
+    .filter(([, info]) => {
+      if (!info.creatorId || !subscribedCreatorIds.has(info.creatorId)) return false;
+      if (creatorSlug && info.creator?.slug !== creatorSlug) return false;
+      return true;
+    })
+    .map(([chId]) => chId);
 
   if (channelIds.length === 0) {
     return { videos: [], total: 0, creators: [] };

@@ -12,6 +12,7 @@ import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Toaster, toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
+import { slugify } from "@/lib/slugify";
 import { StarRating } from "@/components/ui/star-rating";
 import {
   Search,
@@ -388,19 +389,34 @@ export default function AdminPage() {
     setIsCreatingCreator(true);
 
     try {
-      const res = await fetch("/api/creators", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newCreatorName.trim() }),
-      });
+      const name = newCreatorName.trim();
+      const slug = slugify(name);
 
-      if (!res.ok) {
-        const data = await res.json();
-        toast.error(data.error || "Failed to create group");
+      // Get next display_order
+      const { data: existing } = await supabase
+        .from("creators")
+        .select("display_order")
+        .order("display_order", { ascending: false })
+        .limit(1);
+
+      const nextOrder =
+        existing && existing.length > 0 ? existing[0].display_order + 1 : 0;
+
+      const { data: creator, error } = await supabase
+        .from("creators")
+        .insert({ name, slug, display_order: nextOrder })
+        .select()
+        .single();
+
+      if (error) {
+        toast.error(
+          error.code === "23505"
+            ? "A creator with that name already exists"
+            : "Failed to create group"
+        );
         return;
       }
 
-      const creator = await res.json();
       queryClient.invalidateQueries({ queryKey: ["creators"] });
       setNewCreatorName("");
       setShowCreateForm(false);
@@ -415,11 +431,12 @@ export default function AdminPage() {
   const deleteCreator = useCallback(
     async (creatorId: string, creatorName: string) => {
       try {
-        const res = await fetch(`/api/creators/${creatorId}`, {
-          method: "DELETE",
-        });
+        const { error } = await supabase
+          .from("creators")
+          .delete()
+          .eq("id", creatorId);
 
-        if (!res.ok) {
+        if (error) {
           toast.error("Failed to delete group");
           return;
         }
@@ -440,13 +457,12 @@ export default function AdminPage() {
       channelTitle: string
     ) => {
       try {
-        const res = await fetch(`/api/curated-channels/${curatedId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ creator_id: creatorId }),
-        });
+        const { error } = await supabase
+          .from("curated_channels")
+          .update({ creator_id: creatorId })
+          .eq("id", curatedId);
 
-        if (!res.ok) {
+        if (error) {
           toast.error("Failed to move channel");
           return;
         }
@@ -461,14 +477,13 @@ export default function AdminPage() {
             ];
             const curatedRow = allChannels.find((c) => c.id === curatedId);
             if (curatedRow) {
-              await fetch(`/api/creators/${creatorId}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
+              await supabase
+                .from("creators")
+                .update({
                   avatar_channel_id: curatedRow.channel_id,
                   cover_channel_id: curatedRow.channel_id,
-                }),
-              });
+                })
+                .eq("id", creatorId);
             }
           }
         }
@@ -489,12 +504,11 @@ export default function AdminPage() {
   const updateChannelPriority = useCallback(
     async (curatedId: string, priority: number) => {
       try {
-        const res = await fetch(`/api/curated-channels/${curatedId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ priority }),
-        });
-        if (!res.ok) {
+        const { error } = await supabase
+          .from("curated_channels")
+          .update({ priority })
+          .eq("id", curatedId);
+        if (error) {
           toast.error("Failed to update priority");
           return;
         }
@@ -509,12 +523,11 @@ export default function AdminPage() {
   const updateDateRange = useCallback(
     async (curatedId: string, dateRangeOverride: string | null) => {
       try {
-        const res = await fetch(`/api/curated-channels/${curatedId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ date_range_override: dateRangeOverride }),
-        });
-        if (!res.ok) {
+        const { error } = await supabase
+          .from("curated_channels")
+          .update({ date_range_override: dateRangeOverride })
+          .eq("id", curatedId);
+        if (error) {
           toast.error("Failed to update date range");
           return;
         }
@@ -530,12 +543,11 @@ export default function AdminPage() {
   const updateMinDuration = useCallback(
     async (curatedId: string, minDuration: number | null) => {
       try {
-        const res = await fetch(`/api/curated-channels/${curatedId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ min_duration_override: minDuration }),
-        });
-        if (!res.ok) {
+        const { error } = await supabase
+          .from("curated_channels")
+          .update({ min_duration_override: minDuration })
+          .eq("id", curatedId);
+        if (error) {
           toast.error("Failed to update min duration");
           return;
         }
@@ -551,12 +563,11 @@ export default function AdminPage() {
   const updateMaxVideos = useCallback(
     async (curatedId: string, maxVideos: number | null) => {
       try {
-        const res = await fetch(`/api/curated-channels/${curatedId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ max_videos_override: maxVideos }),
-        });
-        if (!res.ok) {
+        const { error } = await supabase
+          .from("curated_channels")
+          .update({ max_videos_override: maxVideos })
+          .eq("id", curatedId);
+        if (error) {
           toast.error("Failed to update max videos");
           return;
         }
@@ -572,12 +583,11 @@ export default function AdminPage() {
   const updateCreatorPriority = useCallback(
     async (creatorId: string, priority: number) => {
       try {
-        const res = await fetch(`/api/creators/${creatorId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ priority }),
-        });
-        if (!res.ok) {
+        const { error } = await supabase
+          .from("creators")
+          .update({ priority })
+          .eq("id", creatorId);
+        if (error) {
           toast.error("Failed to update priority");
           return;
         }
@@ -592,16 +602,15 @@ export default function AdminPage() {
   const updateCreatorAvatar = useCallback(
     async (creatorId: string, channelId: string) => {
       try {
-        const res = await fetch(`/api/creators/${creatorId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+        const { error } = await supabase
+          .from("creators")
+          .update({
             avatar_channel_id: channelId,
             cover_channel_id: channelId,
-          }),
-        });
+          })
+          .eq("id", creatorId);
 
-        if (!res.ok) {
+        if (error) {
           toast.error("Failed to update avatar");
           return;
         }
