@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useMountEffect } from "@/hooks/use-mount-effect";
 import { createPortal } from "react-dom";
 import Image from "next/image";
+import Link from "next/link";
 import { useTheme } from "next-themes";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
@@ -95,6 +96,29 @@ interface CreatorsResponse {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function RainbowLogo({ className = "" }: { className?: string }) {
+  const letters = [
+    { char: "P", color: "var(--logo-green)" },
+    { char: "r", color: "var(--logo-blue)" },
+    { char: "a", color: "var(--logo-red)" },
+    { char: "d", color: "var(--logo-yellow)" },
+    { char: "o", color: "var(--logo-purple)" },
+    { char: "T", color: "var(--logo-green)" },
+    { char: "u", color: "var(--logo-orange)" },
+    { char: "b", color: "var(--logo-blue)" },
+    { char: "e", color: "var(--logo-red)" },
+  ];
+  return (
+    <span className={`font-heading tracking-tight ${className}`}>
+      {letters.map((l, i) => (
+        <span key={i} className="logo-letter" style={{ color: l.color }}>
+          {l.char}
+        </span>
+      ))}
+    </span>
+  );
+}
 
 function formatCount(count: string | number): string {
   const num = typeof count === "number" ? count : parseInt(String(count), 10);
@@ -649,41 +673,39 @@ export default function AdminPage() {
       <Toaster position="bottom-right" />
       <div className="grain-overlay" />
 
-      {/* Full-width header bar */}
-      <header className="admin-header relative z-10">
-        <div className="flex items-center justify-between px-6 py-3">
+      {/* Header — matches home page style */}
+      <header className="player-header sticky top-0 z-50 border-b border-border/50 px-5 py-3">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
-              <Tv className="h-4 w-4 text-primary" />
-            </div>
-            <div>
-              <h1 className="font-heading text-base leading-none tracking-tight text-foreground">
-                PradoTube
-              </h1>
-              <p className="font-body mt-1 text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase">
-                Channel Manager
-              </p>
-            </div>
+            <Link href="/" className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-[#89E219] shadow-sm">
+                <Tv className="h-4.5 w-4.5 text-white" />
+              </div>
+              <RainbowLogo className="text-xl" />
+            </Link>
+            <span className="font-body text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase ml-1">
+              Admin
+            </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <div className="font-body mr-2 hidden items-center gap-4 text-sm text-foreground/60 sm:flex">
               <span className="flex items-center gap-1.5">
                 <Hash className="h-3.5 w-3.5" />
-                {curatedChannels.length} channels
+                {curatedChannels.length}
               </span>
               <span className="flex items-center gap-1.5">
                 <FolderPlus className="h-3.5 w-3.5" />
-                {creators.length} groups
+                {creators.length}
               </span>
               <span className="flex items-center gap-1.5">
                 <CloudUpload className="h-3.5 w-3.5" />
-                {totalUploaded} r2
+                {totalUploaded}
               </span>
             </div>
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              className="rounded-xl p-2 text-muted-foreground transition-all hover:bg-primary/10 hover:text-primary"
               title={sidebarOpen ? "Hide search" : "Show search"}
             >
               {sidebarOpen ? (
@@ -694,7 +716,8 @@ export default function AdminPage() {
             </button>
             <button
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              className="rounded-xl p-2 text-muted-foreground transition-all hover:bg-primary/10 hover:text-primary"
+              aria-label="Toggle theme"
             >
               {mounted ? (
                 theme === "dark" ? (
