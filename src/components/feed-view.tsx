@@ -349,6 +349,7 @@ function FeedHeader({
           <button
             onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
             className="rounded-xl p-2 text-muted-foreground transition-all hover:bg-primary/10 hover:text-primary"
+            aria-label="Toggle theme"
           >
             {resolvedTheme === "dark" ? (
               <Sun className="h-4 w-4" />

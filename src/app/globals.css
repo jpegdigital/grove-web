@@ -142,22 +142,22 @@ body {
    Bold and immersive — movie night mode. */
 
 .dark {
-  --background: #131F24;
+  --background: #0E171B;
   --foreground: #F5F5F5;
-  --card: #1A2B32;
+  --card: #182730;
   --card-foreground: #F5F5F5;
-  --popover: #1A2B32;
+  --popover: #182730;
   --popover-foreground: #F5F5F5;
   --primary: #89E219;
-  --primary-foreground: #131F24;
-  --secondary: #223038;
+  --primary-foreground: #0E171B;
+  --secondary: #1F3340;
   --secondary-foreground: #F5F5F5;
-  --muted: #1E2D34;
+  --muted: #13202A;
   --muted-foreground: #8BA4AF;
   --accent: #1E3A1E;
   --accent-foreground: #F5F5F5;
   --destructive: #FF6B6B;
-  --border: rgba(255, 255, 255, 0.12);
+  --border: rgba(255, 255, 255, 0.10);
   --input: rgba(255, 255, 255, 0.14);
   --ring: #89E219;
 
@@ -188,7 +188,7 @@ body {
   --radius: 0.75rem;
 
   /* Sidebar */
-  --sidebar: #162229;
+  --sidebar: #111E26;
   --sidebar-foreground: #F5F5F5;
   --sidebar-primary: #89E219;
   --sidebar-primary-foreground: #131F24;
@@ -211,19 +211,32 @@ body {
 }
 
 /* ========================
-   Admin Panel Styles (v2)
+   Admin Panel Styles (v3 — Collection Cards)
    ========================
-   Clean workshop aesthetic — professional, precise, satisfying.
-   This is the parent's tool, not the kid's playground. */
+   Colorful card-based collection layout — joyful, spacious, satisfying.
+   Inspired by Apple Settings, Notion, Linear. */
 
 .admin-root {
-  background: var(--muted);
+  background: var(--background);
   position: relative;
   overflow: hidden;
 }
 
-.dark .admin-root {
-  background: color-mix(in srgb, var(--background) 85%, black);
+/* Ambient gradient — subtle depth */
+.admin-root::before {
+  content: "";
+  position: fixed;
+  top: -15%;
+  right: -10%;
+  width: 50%;
+  height: 50%;
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in srgb, var(--primary) 5%, transparent) 0%,
+    transparent 70%
+  );
+  pointer-events: none;
+  z-index: 0;
 }
 
 /* Subtle grain texture overlay */
@@ -232,31 +245,47 @@ body {
   inset: 0;
   z-index: 1;
   pointer-events: none;
-  opacity: 0.015;
+  opacity: 0.018;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
   background-repeat: repeat;
   background-size: 256px 256px;
 }
 
-/* ─── Admin header ─── */
+/* ─── Admin header with rainbow accent line ─── */
 .admin-header {
-  background: var(--background);
-  border-bottom: 1px solid var(--border);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  background: color-mix(in srgb, var(--background) 92%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: none;
+  position: relative;
 }
 
-.dark .admin-header {
-  background: var(--card);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+.admin-header::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--coral),
+    var(--sunflower),
+    var(--mint),
+    var(--sky),
+    var(--lavender),
+    var(--peach)
+  );
+  opacity: 0.7;
 }
 
-/* ─── V2: Two-panel layout ─── */
+/* ─── Two-panel layout ─── */
 .admin-layout-v2 {
   display: flex;
-  height: calc(100vh - 53px);
+  height: calc(100vh - 55px);
 }
 
-/* ─── Main content: Groups & Channels ─── */
+/* ─── Main content ─── */
 .admin-main-v2 {
   flex: 1;
   min-width: 0;
@@ -270,7 +299,7 @@ body {
   border-left: 1px solid var(--border);
   background: var(--muted);
   overflow-y: auto;
-  height: calc(100vh - 53px);
+  height: calc(100vh - 55px);
   transition: width 0.2s ease, opacity 0.2s ease;
 }
 
@@ -281,133 +310,8 @@ body {
   opacity: 0;
 }
 
-.dark .admin-search-sidebar {
-  background: color-mix(in srgb, var(--card) 40%, var(--background));
-}
-
 .admin-search-results {
   height: calc(100vh - 210px);
-}
-
-/* ─── Group sections (vertical list) ─── */
-.admin-group-section {
-  background: var(--background);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  overflow: visible;
-  transition: all 0.15s ease;
-  position: relative;
-  min-width: 0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
-}
-
-.admin-group-section:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  border-color: color-mix(in srgb, var(--foreground) 12%, var(--border));
-}
-
-.dark .admin-group-section {
-  background: var(--card);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-}
-
-.dark .admin-group-section:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-}
-
-.admin-group-ungrouped {
-  border-style: dashed;
-  background: color-mix(in srgb, var(--muted) 60%, var(--background));
-  box-shadow: none;
-}
-
-.dark .admin-group-ungrouped {
-  background: color-mix(in srgb, var(--card) 60%, var(--background));
-}
-
-/* Group header row */
-.admin-group-header {
-  padding: 0.75rem 1rem;
-  transition: background 0.12s ease;
-  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-}
-
-/* When group has no expanded channels, round all corners */
-.admin-group-section:not(:has(.admin-group-channels)) .admin-group-header {
-  border-radius: var(--radius-xl);
-}
-
-.admin-group-header:hover {
-  background: color-mix(in srgb, var(--secondary) 50%, transparent);
-}
-
-/* Channels area inside group */
-.admin-group-channels {
-  border-top: 1px solid var(--border);
-  padding: 0.25rem 0;
-  border-radius: 0 0 var(--radius-xl) var(--radius-xl);
-  background: inherit;
-}
-
-/* ─── Grid layout for tile view ─── */
-.admin-main-v2 {
-  container-type: inline-size;
-}
-
-.admin-groups-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1rem;
-}
-
-@container (min-width: 640px) {
-  .admin-groups-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@container (min-width: 960px) {
-  .admin-groups-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-/* Cover image strip — grid mode tiles */
-.admin-tile-cover {
-  position: relative;
-  height: 56px;
-  width: 100%;
-  overflow: hidden;
-  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-}
-
-.admin-tile-cover-fade {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(to top, var(--background) 5%, transparent 100%);
-}
-
-.dark .admin-tile-cover-fade {
-  background: linear-gradient(
-    to top,
-    var(--card) 5%,
-    transparent 100%
-  );
-}
-
-/* In grid mode, no left accent border needed */
-.admin-groups-grid .admin-group-header {
-  border-left: none;
-}
-
-/* ─── Channel row (inside group tiles) ─── */
-.channel-row {
-  border-radius: var(--radius-md);
-  transition: background 0.12s ease;
-}
-
-.channel-row:hover {
-  background: color-mix(in srgb, var(--secondary) 70%, transparent);
 }
 
 /* ─── Search result cards (sidebar) ─── */
@@ -420,7 +324,7 @@ body {
 
 .search-result-card:hover {
   border-color: color-mix(in srgb, var(--foreground) 15%, var(--border));
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 /* ─── Segmented toggle ─── */
@@ -504,11 +408,6 @@ body {
   z-index: 50;
 }
 
-/* Elevate the group section when its dropdown is open */
-.admin-group-section:has(.admin-move-dropdown) {
-  z-index: 40;
-}
-
 /* ─── Create group form ─── */
 .creator-group-form {
   background: var(--secondary);
@@ -541,6 +440,471 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--foreground) 25%, transparent);
+}
+
+/* ========================
+   Collection Cards (tt-*)
+   ========================
+   Card-based collection layout. Groups are colored cards,
+   channels are compact items within. */
+
+/* ─── Container: group cards, 2-col on wide desktop ─── */
+.tt-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-family: var(--font-nunito), system-ui, sans-serif;
+}
+
+.tt-container > * {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+@media (min-width: 1280px) {
+  .tt-container > * {
+    flex: 1 1 calc(50% - 0.5rem);
+    max-width: calc(50% - 0.5rem);
+  }
+}
+
+/* ─── Group card ─── */
+.tt-group {
+  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--group-accent, var(--primary)) 20%, var(--border));
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.04),
+    0 0 0 1px color-mix(in srgb, var(--group-accent, var(--primary)) 8%, transparent);
+  border-left: 4px solid var(--group-accent, var(--primary));
+  transition: box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.tt-group:hover {
+  border-color: color-mix(in srgb, var(--group-accent, var(--primary)) 35%, var(--border));
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.08),
+    0 0 0 1px color-mix(in srgb, var(--group-accent, var(--primary)) 15%, transparent);
+}
+
+.dark .tt-group {
+  background: color-mix(in srgb, var(--group-accent, var(--primary)) 4%, var(--card));
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 color-mix(in srgb, var(--group-accent, var(--primary)) 8%, transparent);
+}
+
+.dark .tt-group:hover {
+  background: color-mix(in srgb, var(--group-accent, var(--primary)) 7%, var(--card));
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    0 0 20px color-mix(in srgb, var(--group-accent, var(--primary)) 8%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--group-accent, var(--primary)) 12%, transparent);
+}
+
+/* ─── Accent color rotation ─── */
+.tt-accent-0 { --group-accent: var(--coral); }
+.tt-accent-1 { --group-accent: var(--sky); }
+.tt-accent-2 { --group-accent: var(--sunflower); }
+.tt-accent-3 { --group-accent: var(--lavender); }
+.tt-accent-4 { --group-accent: var(--teal); }
+.tt-accent-5 { --group-accent: var(--peach); }
+
+/* ─── Ungrouped section ─── */
+.tt-group-ungrouped {
+  --group-accent: var(--muted-foreground);
+  opacity: 0.8;
+}
+
+.tt-group-ungrouped:hover {
+  opacity: 1;
+}
+
+/* ─── Group header ─── */
+.tt-group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: color-mix(in srgb, var(--group-accent) 8%, var(--card));
+  border-bottom: 1px solid color-mix(in srgb, var(--group-accent) 10%, var(--border));
+  min-height: 56px;
+}
+
+.dark .tt-group-header {
+  background: color-mix(in srgb, var(--group-accent) 15%, var(--card));
+}
+
+/* ─── Group avatar ─── */
+.tt-avatar {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--group-accent) 50%, transparent);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.tt-avatar:hover {
+  box-shadow: 0 0 0 2.5px var(--group-accent), 0 0 12px color-mix(in srgb, var(--group-accent) 25%, transparent);
+  transform: scale(1.05);
+}
+
+.tt-avatar-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.tt-avatar:hover .tt-avatar-overlay {
+  opacity: 1;
+}
+
+/* ─── Avatar picker row ─── */
+.tt-avatar-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem 0.5rem 4.25rem;
+  background: color-mix(in srgb, var(--group-accent) 3%, var(--muted));
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+.tt-avatar-option {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  overflow: hidden;
+  box-shadow: 0 0 0 2px var(--border);
+  transition: transform 0.15s, box-shadow 0.15s;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.tt-avatar-option:hover {
+  transform: scale(1.12);
+}
+
+.tt-avatar-option-active {
+  box-shadow: 0 0 0 2px var(--group-accent);
+}
+
+/* ─── Group info ─── */
+.tt-group-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.tt-group-name {
+  font-family: var(--font-fredoka), "Comic Sans MS", cursive;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tt-group-meta {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+/* ─── Group controls (right side) ─── */
+.tt-group-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+/* ─── Ungrouped header icon ─── */
+.tt-ungrouped-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--secondary);
+}
+
+/* ─── Channel list inside a group ─── */
+.tt-channels {
+  padding: 0.25rem 0 0.375rem;
+}
+
+/* ─── Channel item — compact card-like row ─── */
+.tt-channel {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem 0.5rem 1.25rem;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+  min-height: 52px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
+}
+
+.tt-channel:last-child {
+  border-bottom: none;
+}
+
+.tt-channel:hover {
+  background: color-mix(in srgb, var(--group-accent, var(--primary)) 6%, transparent);
+  box-shadow: inset 3px 0 0 var(--group-accent, var(--primary));
+}
+
+/* ─── Channel empty row ─── */
+.tt-channel-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+/* ─── Channel thumbnail — round ─── */
+.tt-ch-thumb {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px var(--border);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.tt-channel:hover .tt-ch-thumb {
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--group-accent) 50%, var(--border));
+  transform: scale(1.05);
+}
+
+/* ─── Channel body (right of thumb) ─── */
+.tt-ch-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.tt-ch-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.tt-ch-title {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* ─── Channel actions — visible on hover ─── */
+.tt-ch-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.tt-channel:hover .tt-ch-actions {
+  opacity: 1;
+}
+
+/* ─── Channel meta line — stars, sync, range, duration ─── */
+.tt-ch-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.1875rem;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  flex-wrap: wrap;
+}
+
+.tt-dot {
+  opacity: 0.3;
+  font-size: 0.5rem;
+  line-height: 1;
+}
+
+/* ─── Sync count styling ─── */
+.tt-sync {
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+  font-size: 0.8125rem;
+}
+
+.tt-sync-ok {
+  color: #10b981;
+  font-weight: 600;
+}
+
+.tt-sync-total {
+  font-weight: 400;
+  opacity: 0.6;
+  font-size: 0.7rem;
+}
+
+/* ─── Date range pills ─── */
+.tt-range-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--secondary);
+  border-radius: 9999px;
+  padding: 2px;
+}
+
+.tt-range-pill {
+  font-size: 0.675rem;
+  font-family: var(--font-nunito), system-ui, sans-serif;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.tt-range-pill:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+.tt-range-pill-active {
+  background: var(--group-accent, var(--primary));
+  color: white;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--group-accent, var(--primary)) 30%, transparent);
+}
+
+.tt-range-pill-active:hover {
+  background: var(--group-accent, var(--primary));
+  color: white;
+  opacity: 0.9;
+}
+
+/* ─── Inline meta input (min duration) ─── */
+.tt-meta-input {
+  background: transparent;
+  border: 1px solid transparent;
+  font-size: 0.75rem;
+  font-family: var(--font-nunito), system-ui, sans-serif;
+  color: var(--muted-foreground);
+  width: 3.5rem;
+  text-align: center;
+  padding: 0.125rem 0.25rem;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s;
+}
+
+.tt-meta-input:hover {
+  background: var(--secondary);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.tt-meta-input:focus {
+  outline: none;
+  background: var(--secondary);
+  border-color: var(--primary);
+  color: var(--foreground);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.tt-meta-input::placeholder {
+  color: var(--muted-foreground);
+  opacity: 0.4;
+}
+
+/* ─── Action buttons ─── */
+.tt-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.tt-action-btn:hover {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+
+.tt-action-danger:hover {
+  background: color-mix(in srgb, var(--destructive) 12%, transparent);
+  color: var(--destructive);
+}
+
+/* ─── Desktop: show all meta items ─── */
+@media (min-width: 768px) {
+  .tt-ch-meta {
+    flex-wrap: nowrap;
+  }
+}
+
+/* ─── Mobile: simplify channel items ─── */
+@media (max-width: 767px) {
+  .tt-ch-meta .tt-meta-select,
+  .tt-ch-meta .tt-meta-input {
+    display: none;
+  }
+
+  /* Hide the dots before hidden controls */
+  .tt-ch-meta .tt-dot:nth-last-child(-n+4) {
+    display: none;
+  }
+
+  /* Always show actions on mobile (no hover) */
+  .tt-ch-actions {
+    opacity: 1;
+  }
+
+  .tt-group-header {
+    padding: 0.625rem 0.75rem;
+  }
+
+  .tt-channel {
+    padding: 0.5rem 0.75rem 0.5rem 1rem;
+  }
+}
+
+/* ─── Global: prevent iOS auto-zoom ─── */
+input,
+select,
+textarea {
+  font-size: max(16px, 1em) !important;
 }
 
 /* ─── Responsive: stack layout on small screens ─── */
@@ -950,24 +1314,31 @@ body {
 /* ─── Skeleton shimmer ─── */
 
 @keyframes skeleton-shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  100% { transform: translateX(100%); }
 }
 
 .skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
   background-color: var(--muted);
-  background-image: linear-gradient(
+}
+
+.skeleton-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
     90deg,
     transparent 25%,
     rgba(255, 255, 255, 0.15) 50%,
     transparent 75%
   );
-  background-size: 200% 100%;
   animation: skeleton-shimmer 1.5s ease-in-out infinite;
 }
 
-.dark .skeleton-shimmer {
-  background-image: linear-gradient(
+.dark .skeleton-shimmer::after {
+  background: linear-gradient(
     90deg,
     transparent 25%,
     rgba(255, 255, 255, 0.06) 50%,
@@ -976,9 +1347,9 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .skeleton-shimmer {
+  .skeleton-shimmer::after {
     animation: none;
-    background-image: none;
+    display: none;
   }
 }
 
