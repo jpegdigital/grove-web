@@ -20,6 +20,10 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "*.r2.dev",
       },
+      {
+        protocol: "https",
+        hostname: "grove-media.pof4.com",
+      },
     ],
   },
 };

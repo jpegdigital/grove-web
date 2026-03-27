@@ -79,7 +79,7 @@ def load_config() -> dict:
             "throttle_max_seconds": 5,
         },
         "ytdlp": {
-            "format": "bv[height<=%(max_height)s][ext=mp4]+ba[ext=m4a]/b[height<=%(max_height)s][ext=mp4]/b[ext=mp4]",
+            "format": "bv[height<=%(max_height)s][ext=mp4][vcodec~='^(avc|h264)']+ba[ext=m4a]/b[height<=%(max_height)s][ext=mp4][vcodec~='^(avc|h264)']",
             "max_height": 1080,
             "merge_output_format": "mp4",
             "faststart": True,
@@ -272,7 +272,10 @@ def build_format_selector(tier: dict) -> str:
         Format selector string like "bv[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]"
     """
     h = tier["height"]
-    return f"bv[height<={h}][ext=mp4]+ba[ext=m4a]/b[height<={h}][ext=mp4]"
+    return (
+        f"bv[height<={h}][ext=mp4][vcodec~='^(avc|h264)']+ba[ext=m4a]"
+        f"/b[height<={h}][ext=mp4][vcodec~='^(avc|h264)']"
+    )
 
 
 def build_ffmpeg_remux_cmd(
@@ -356,9 +359,9 @@ def build_r2_key_hls(
         relative_path: Path relative to video folder (e.g. "master.m3u8", "720p/seg_000.m4s").
 
     Returns:
-        R2 key like "@handle/YYYY-MM/video_id/master.m3u8"
+        R2 key like "handle/YYYY-MM/video_id/master.m3u8"
     """
-    handle = channel_handle if channel_handle.startswith("@") else f"@{channel_handle}"
+    handle = channel_handle.lstrip("@")
 
     if published_at:
         try:
@@ -595,47 +598,134 @@ def remux_to_hls(
     return remuxed_tiers
 
 
+def ffprobe_streams(mp4_path: Path) -> dict | None:
+    """Run ffprobe on an MP4 and return parsed stream info.
+
+    Returns:
+        Dict with 'video' and 'audio' stream dicts, or None on failure.
+    """
+    cmd = [
+        "ffprobe", "-v", "quiet",
+        "-print_format", "json",
+        "-show_streams",
+        str(mp4_path),
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            return None
+        data = json.loads(result.stdout)
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+        return None
+
+    streams = data.get("streams", [])
+    video = None
+    audio = None
+    for s in streams:
+        if s.get("codec_type") == "video" and video is None:
+            video = s
+        elif s.get("codec_type") == "audio" and audio is None:
+            audio = s
+    return {"video": video, "audio": audio}
+
+
+def build_codec_string(probe: dict) -> str:
+    """Build RFC 6381 codec string from ffprobe stream data.
+
+    Constructs accurate avc1.PPCCLL and mp4a.40.XX strings from the actual
+    profile, level, and audio object type in the file.
+
+    Args:
+        probe: Dict from ffprobe_streams() with 'video' and 'audio' keys.
+
+    Returns:
+        Codec string like "avc1.640028,mp4a.40.2".
+    """
+    parts = []
+
+    video = probe.get("video")
+    if video and video.get("codec_name") in ("h264", "avc1"):
+        # Build avc1.PPCCLL from profile and level
+        profile = video.get("profile", "").lower()
+        level = video.get("level", 31)
+
+        # Map ffprobe profile names → ISO 14496-10 profile_idc hex
+        profile_map = {
+            "baseline": "42",
+            "constrained baseline": "42",
+            "main": "4d",
+            "high": "64",
+            "high 10": "6e",
+            "high 4:2:2": "7a",
+            "high 4:4:4 predictive": "f4",
+        }
+        profile_hex = profile_map.get(profile, "64")  # default High
+
+        # Constraint flags — Constrained Baseline sets constraint_set1_flag
+        constraint_hex = "c0" if "constrained" in profile else "00"
+
+        # Level is an integer like 31 for 3.1 — convert to two hex digits
+        level_hex = f"{level:02x}"
+
+        parts.append(f"avc1.{profile_hex}{constraint_hex}{level_hex}")
+    else:
+        parts.append("avc1.640028")  # safe fallback: High L4.0
+
+    audio = probe.get("audio")
+    if audio and audio.get("codec_name") == "aac":
+        # mp4a.40.{object_type}: 2=AAC-LC, 5=HE-AAC, 29=HE-AACv2
+        aot_map = {"lc": "2", "he-aac": "5", "he-aacv2": "29"}
+        audio_profile = (audio.get("profile") or "lc").lower().replace("_", "-")
+        aot = aot_map.get(audio_profile, "2")
+        parts.append(f"mp4a.40.{aot}")
+    else:
+        parts.append("mp4a.40.2")  # safe fallback: AAC-LC
+
+    return ",".join(parts)
+
+
 def extract_tier_metadata(tier: dict, sidecar_files: dict[str, Path]) -> dict:
-    """Extract bandwidth, resolution, and codecs for a tier from info.json or ffprobe.
+    """Extract bandwidth, resolution, and codecs for a tier via ffprobe.
+
+    Probes the actual MP4 file to get accurate codec strings, resolution,
+    and bitrate instead of guessing from config or info.json.
 
     Args:
         tier: Tier dict with 'label', 'height', 'bandwidth', 'mp4_path'.
-        sidecar_files: Dict with optional 'info_json' Path.
+        sidecar_files: Dict with optional 'info_json' Path (unused, kept for API compat).
 
     Returns:
         Dict with 'bandwidth', 'resolution', 'codecs' keys.
     """
-    # Start with config defaults
+    # Config fallbacks
     bandwidth = tier.get("bandwidth", 2500000)
     height = tier.get("height", 720)
-    width = int(height * 16 / 9)  # Assume 16:9 default
-    codecs = "avc1.4d401f,mp4a.40.2"  # Default H.264 Main + AAC
+    width = int(height * 16 / 9)
+    codecs = "avc1.640028,mp4a.40.2"
 
-    # Try to read actual metadata from info.json
-    info_path = sidecar_files.get("info_json")
-    if info_path and info_path.exists():
-        try:
-            data = json.loads(info_path.read_text(encoding="utf-8"))
-            # Get actual width/height for this resolution
-            actual_width = data.get("width")
-            actual_height = data.get("height")
-            if actual_width and actual_height:
-                # Scale for this tier
-                scale = height / actual_height if actual_height > 0 else 1
-                width = int(actual_width * scale)
-                # Ensure even dimensions
-                width = width + (width % 2)
+    mp4_path = tier.get("mp4_path")
+    if mp4_path and Path(mp4_path).exists():
+        probe = ffprobe_streams(Path(mp4_path))
+        if probe:
+            # Actual codec string
+            codecs = build_codec_string(probe)
 
-            # Try to get actual bitrate
-            tbr = data.get("tbr")
-            if tbr:
-                # tbr is in kbps, bandwidth is in bps
-                # Scale proportionally for this tier
-                if actual_height and actual_height > 0:
-                    ratio = (height / actual_height) ** 2
-                    bandwidth = int(tbr * 1000 * ratio)
-        except (json.JSONDecodeError, OSError):
-            pass
+            # Actual resolution from this tier's file
+            video = probe.get("video")
+            if video:
+                actual_w = video.get("width")
+                actual_h = video.get("height")
+                if actual_w and actual_h:
+                    width = actual_w
+                    height = actual_h
+
+                # Actual bitrate (bit_rate is per-stream, prefer overall)
+                vbr = int(video.get("bit_rate", 0))
+                audio = probe.get("audio")
+                abr = int(audio.get("bit_rate", 0)) if audio else 0
+                total = vbr + abr
+                if total > 0:
+                    bandwidth = total
 
     resolution = f"{width}x{height}"
     return {"bandwidth": bandwidth, "resolution": resolution, "codecs": codecs}
@@ -771,70 +861,6 @@ def upload_hls_package(
 
 
 # ─── Download Pipeline (US1) ─────────────────────────────────────────────────
-
-
-def download_video(video_id: str, staging_dir: Path, config: dict) -> tuple[bool, str]:
-    """Download a video via yt-dlp subprocess. Returns (success, stderr)."""
-    ytdlp_cfg = config["ytdlp"]
-    max_height = ytdlp_cfg["max_height"]
-
-    # Build format string with max_height interpolated
-    fmt = ytdlp_cfg["format"] % {"max_height": max_height}
-
-    output_template = str(staging_dir / f"{video_id}.%(ext)s")
-
-    cmd = [
-        sys.executable, "-m", "yt_dlp",
-        "--format", fmt,
-        "--merge-output-format", ytdlp_cfg["merge_output_format"],
-        "--output", output_template,
-        "--no-playlist",
-        "--no-overwrites",
-    ]
-
-    # Cookies for YouTube auth (bypasses bot detection)
-    if COOKIES_FILE.exists():
-        cmd.extend(["--cookies", str(COOKIES_FILE)])
-
-    # Match filters — skip live/upcoming content that can't be downloaded
-    if ytdlp_cfg.get("match_filters"):
-        cmd.extend(["--match-filters", ytdlp_cfg["match_filters"]])
-
-    # Subtitle request throttle — separate sleep to avoid bot detection
-    if ytdlp_cfg.get("sleep_interval_subtitles"):
-        cmd.extend(["--sleep-subtitles", str(ytdlp_cfg["sleep_interval_subtitles"])])
-
-    # Faststart postprocessor
-    if ytdlp_cfg.get("faststart"):
-        cmd.extend(["--postprocessor-args", "ffmpeg:-movflags +faststart"])
-
-    # Sidecar flags
-    if ytdlp_cfg.get("write_thumbnail"):
-        cmd.append("--write-thumbnail")
-    if ytdlp_cfg.get("write_subs"):
-        cmd.append("--write-subs")
-    if ytdlp_cfg.get("write_auto_subs"):
-        cmd.append("--write-auto-subs")
-    if ytdlp_cfg.get("sub_langs"):
-        cmd.extend(["--sub-langs", ytdlp_cfg["sub_langs"]])
-    if ytdlp_cfg.get("sub_format"):
-        cmd.extend(["--sub-format", ytdlp_cfg["sub_format"]])
-    if ytdlp_cfg.get("write_info_json"):
-        cmd.append("--write-info-json")
-
-    # Remote JS challenge solver (deno) — each component needs its own flag
-    rc = ytdlp_cfg.get("remote_components")
-    if rc:
-        components = rc if isinstance(rc, str) else "ejs:github,ejs:npm"
-        for comp in components.split(","):
-            cmd.extend(["--remote-components", comp.strip()])
-
-    # The video URL
-    cmd.append(f"https://www.youtube.com/watch?v={video_id}")
-
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-    return (result.returncode == 0, result.stderr)
-
 
 
 
@@ -1017,32 +1043,55 @@ def process_download_job(
 
 
 def delete_from_r2(r2_client, bucket: str, job_metadata: dict) -> tuple[bool, str | None]:
-    """Delete media, thumbnail, subtitle, and info.json from R2."""
+    """Delete all R2 objects for a video by listing the HLS folder prefix.
+
+    HLS packages have many files (master.m3u8, per-tier playlists, init.mp4,
+    segments). Instead of guessing individual keys, list everything under the
+    video's folder prefix and batch-delete.
+    """
     from botocore.exceptions import ClientError
 
-    paths_to_delete = []
-    for key in ("media_path", "thumbnail_path", "subtitle_path"):
-        path = job_metadata.get(key)
-        if path:
-            paths_to_delete.append(path)
-
-    # Derive info.json key from media_path
     media_path = job_metadata.get("media_path")
-    if media_path:
-        info_key = str(Path(media_path).with_suffix(".info.json")).replace("\\", "/")
-        paths_to_delete.append(info_key)
+    if not media_path:
+        return True, None
+
+    # media_path is like "handle/YYYY-MM/video_id/master.m3u8"
+    # We want the folder prefix: "handle/YYYY-MM/video_id/"
+    prefix = media_path.rsplit("/", 1)[0] + "/"
 
     errors = []
-    for r2_key in paths_to_delete:
-        try:
-            r2_client.delete_object(Bucket=bucket, Key=r2_key)
-            print(f"    Deleted R2: {r2_key}")
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "Unknown")
-            if error_code == "NoSuchKey":
-                print(f"    Already gone: {r2_key}")
-            else:
-                errors.append(f"{r2_key}: [{error_code}] {e}")
+    deleted_count = 0
+
+    try:
+        # List all objects under the video's prefix
+        paginator = r2_client.get_paginator("list_objects_v2")
+        objects_to_delete = []
+
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                objects_to_delete.append({"Key": obj["Key"]})
+
+        if not objects_to_delete:
+            print(f"    No objects found under prefix: {prefix}")
+            return True, None
+
+        # Batch delete (S3/R2 supports up to 1000 per request)
+        for i in range(0, len(objects_to_delete), 1000):
+            batch = objects_to_delete[i : i + 1000]
+            resp = r2_client.delete_objects(
+                Bucket=bucket,
+                Delete={"Objects": batch, "Quiet": True},
+            )
+            batch_errors = resp.get("Errors", [])
+            if batch_errors:
+                for err in batch_errors:
+                    errors.append(f"{err['Key']}: [{err.get('Code')}] {err.get('Message')}")
+            deleted_count += len(batch) - len(batch_errors)
+
+        print(f"    Deleted {deleted_count} R2 object(s) under {prefix}")
+
+    except ClientError as e:
+        errors.append(f"List/delete failed for prefix {prefix}: {e}")
 
     if errors:
         return False, "; ".join(errors)
@@ -1152,30 +1201,32 @@ def validate_env():
 
 
 def check_ffmpeg():
-    """Verify ffmpeg is on PATH — required for HLS remux and yt-dlp muxing.
+    """Verify ffmpeg and ffprobe are on PATH.
 
-    Fails fast with actionable error if ffmpeg is not available.
+    Both are required: ffmpeg for HLS remux, ffprobe for codec/bitrate probing.
+    They ship together, so if one is missing the install is incomplete.
     """
-    try:
-        result = subprocess.run(
-            ["ffmpeg", "-version"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode != 0:
-            print("Error: ffmpeg found but returned non-zero exit code.")
-            print("  Install ffmpeg: https://ffmpeg.org/download.html")
+    for tool in ("ffmpeg", "ffprobe"):
+        try:
+            result = subprocess.run(
+                [tool, "-version"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode != 0:
+                print(f"Error: {tool} found but returned non-zero exit code.")
+                print("  Install ffmpeg: https://ffmpeg.org/download.html")
+                sys.exit(2)
+        except FileNotFoundError:
+            print(f"Error: {tool} not found on PATH.")
+            print(f"  {tool} is required for HLS pipeline (remux + codec probing).")
+            print("  Install ffmpeg (includes ffprobe): https://ffmpeg.org/download.html")
+            print("  Windows: winget install ffmpeg")
+            print("  macOS: brew install ffmpeg")
+            print("  Linux: apt install ffmpeg")
             sys.exit(2)
-    except FileNotFoundError:
-        print("Error: ffmpeg not found on PATH.")
-        print("  ffmpeg is required for HLS remux (-c copy) and yt-dlp muxing.")
-        print("  Install ffmpeg: https://ffmpeg.org/download.html")
-        print("  Windows: winget install ffmpeg")
-        print("  macOS: brew install ffmpeg")
-        print("  Linux: apt install ffmpeg")
-        sys.exit(2)
-    except subprocess.TimeoutExpired:
-        print("Error: ffmpeg timed out during version check.")
-        sys.exit(2)
+        except subprocess.TimeoutExpired:
+            print(f"Error: {tool} timed out during version check.")
+            sys.exit(2)
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────

@@ -17,8 +17,9 @@ consumer:
   throttle_max_seconds: 5
 
 ytdlp:
-  # yt-dlp format selection: best mp4 video + m4a audio, merge to mp4
-  format: "bv[height<=%(max_height)s][ext=mp4]+ba[ext=m4a]/b[height<=%(max_height)s][ext=mp4]/b[ext=mp4]"
+  # yt-dlp format selection: best H.264 mp4 video + m4a audio, merge to mp4
+  # vcodec filter ensures H.264 only (no AV1/VP9) for iPad/Safari compatibility
+  format: "bv[height<=%(max_height)s][ext=mp4][vcodec~='^(avc|h264)']+ba[ext=m4a]/b[height<=%(max_height)s][ext=mp4][vcodec~='^(avc|h264)']"
 
   # Maximum video height (1080p keeps file sizes manageable)
   max_height: 1080
