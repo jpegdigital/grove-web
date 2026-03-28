@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Moon, Play, Sun } from "lucide-react";
+import { Moon, Play, Sun, Tv } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useTheme } from "next-themes";
@@ -240,7 +240,7 @@ export default function Home() {
 			<div className="player-root flex min-h-screen items-center justify-center">
 				<div className="grain-overlay" />
 				<div className="relative z-10 flex flex-col items-center gap-5 text-center px-6">
-					<div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-primary/20 to-lavender/20 ring-1 ring-primary/15">
+					<div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-linear-to-br from-primary/20 to-lavender/20 ring-1 ring-primary/15">
 						<Tv className="h-9 w-9 text-primary" />
 					</div>
 					<h1 className="font-heading text-2xl text-foreground">

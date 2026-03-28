@@ -8,6 +8,7 @@ import {
   Sun,
   Moon,
   ChevronDown,
+  Tv,
 } from "lucide-react";
 import { VideoCard } from "@/components/video-card";
 import { CreatorChips } from "@/components/creator-chips";
@@ -169,7 +170,7 @@ export function FeedView({ creatorSlug }: { creatorSlug: string | null }) {
           setTheme={setTheme}
         />
         <div className="relative z-10 flex flex-col items-center justify-center gap-5 text-center px-6 pt-24">
-          <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-primary/20 to-lavender/20 ring-1 ring-primary/15">
+          <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-linear-to-br from-primary/20 to-lavender/20 ring-1 ring-primary/15">
             <Tv className="h-9 w-9 text-primary" />
           </div>
           <h1 className="font-heading text-2xl text-foreground">
