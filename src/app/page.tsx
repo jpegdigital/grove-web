@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Moon, Play, Sun, Tv } from "lucide-react";
+import { Moon, Play, Sun } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useTheme } from "next-themes";
@@ -31,30 +31,6 @@ interface SubscriptionRow {
 }
 
 /* ─── Helpers ─── */
-
-function RainbowLogo({ className = "" }: { className?: string }) {
-	const letters = [
-		{ char: "P", color: "var(--logo-green)" },
-		{ char: "r", color: "var(--logo-blue)" },
-		{ char: "a", color: "var(--logo-red)" },
-		{ char: "d", color: "var(--logo-yellow)" },
-		{ char: "o", color: "var(--logo-purple)" },
-		{ char: "T", color: "var(--logo-green)" },
-		{ char: "u", color: "var(--logo-orange)" },
-		{ char: "b", color: "var(--logo-blue)" },
-		{ char: "e", color: "var(--logo-red)" },
-	];
-
-	return (
-		<span className={`font-heading tracking-tight ${className}`}>
-			{letters.map((l) => (
-				<span key={l.char} className="logo-letter" style={{ color: l.color }}>
-					{l.char}
-				</span>
-			))}
-		</span>
-	);
-}
 
 /** Accent gradient pairs — vivid rings for each creator */
 const ACCENT_RINGS = [
@@ -305,12 +281,9 @@ export default function Home() {
 			{/* Header */}
 			<header className="player-header sticky top-0 z-50 border-b border-border/50 px-5 py-3">
 				<div className="max-w-6xl mx-auto flex items-center justify-between">
-					<div className="flex items-center gap-3">
-						<div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-[#89E219] shadow-sm">
-							<Tv className="h-4.5 w-4.5 text-white" />
-						</div>
-						<RainbowLogo className="text-xl" />
-					</div>
+					<Link href="/" className="flex items-center">
+						<img src="/logo.svg" alt="PradoTube" className="h-8" />
+					</Link>
 					<div className="flex items-center gap-1.5">
 						<Link
 							href="/feed"

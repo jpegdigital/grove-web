@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Tv, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -40,21 +40,8 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center px-6 bg-background">
       <div className="w-full max-w-sm">
         {/* Logo */}
-        <div className="flex flex-col items-center gap-3 mb-8">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-[#89E219] shadow-lg shadow-primary/25">
-            <Tv className="h-7 w-7 text-white" />
-          </div>
-          <h1 className="font-heading text-3xl tracking-tight text-foreground">
-            <span style={{ color: "var(--logo-green)" }}>P</span>
-            <span style={{ color: "var(--logo-blue)" }}>r</span>
-            <span style={{ color: "var(--logo-red)" }}>a</span>
-            <span style={{ color: "var(--logo-yellow)" }}>d</span>
-            <span style={{ color: "var(--logo-purple)" }}>o</span>
-            <span style={{ color: "var(--logo-green)" }}>T</span>
-            <span style={{ color: "var(--logo-orange)" }}>u</span>
-            <span style={{ color: "var(--logo-blue)" }}>b</span>
-            <span style={{ color: "var(--logo-red)" }}>e</span>
-          </h1>
+        <div className="flex justify-center mb-8">
+          <img src="/logo.svg" alt="PradoTube" className="h-12" />
         </div>
 
         <Card className="p-6">

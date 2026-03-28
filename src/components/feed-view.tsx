@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import Link from "next/link";
 import {
-  Tv,
   Sun,
   Moon,
   ChevronDown,
@@ -26,29 +25,6 @@ const SKELETON_CHIP_COUNT = 10;
 const SKELETON_TITLE_WIDTHS = ["75%", "60%", "85%", "70%", "80%", "65%"];
 
 /* ─── Helpers ─── */
-
-function RainbowLogo({ className = "" }: { className?: string }) {
-  const letters = [
-    { char: "P", color: "var(--logo-green)" },
-    { char: "r", color: "var(--logo-blue)" },
-    { char: "a", color: "var(--logo-red)" },
-    { char: "d", color: "var(--logo-yellow)" },
-    { char: "o", color: "var(--logo-purple)" },
-    { char: "T", color: "var(--logo-green)" },
-    { char: "u", color: "var(--logo-orange)" },
-    { char: "b", color: "var(--logo-blue)" },
-    { char: "e", color: "var(--logo-red)" },
-  ];
-  return (
-    <span className={`font-heading tracking-tight ${className}`}>
-      {letters.map((l, i) => (
-        <span key={i} className="logo-letter" style={{ color: l.color }}>
-          {l.char}
-        </span>
-      ))}
-    </span>
-  );
-}
 
 /* ─── Skeleton Components ─── */
 
@@ -332,11 +308,8 @@ function FeedHeader({
     <header className="player-header sticky top-0 z-50 border-b border-border/50 px-5 py-3">
       <div className="max-w-6xl mx-auto flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Link href="/" className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-[#89E219] shadow-sm">
-              <Tv className="h-4.5 w-4.5 text-white" />
-            </div>
-            <RainbowLogo className="text-xl" />
+          <Link href="/" className="flex items-center">
+            <img src="/logo.svg" alt="PradoTube" className="h-8" />
           </Link>
         </div>
         <div className="flex items-center gap-1.5">
